@@ -4,6 +4,7 @@ import re
 import threading
 from collections import deque
 from collections.abc import Callable, Sequence
+from itertools import product
 from typing import Protocol
 
 from .settings import ReverbSettings
@@ -45,6 +46,7 @@ class AudioBackend(Protocol):
         input_device: str,
         output_device: str,
         settings: ReverbSettings,
+        monitor_output: str | None = None,
     ) -> AudioStream: ...
 
     def update_reverb(self, settings: ReverbSettings) -> None: ...
@@ -124,12 +126,22 @@ class PedalboardBackend:
         input_device: str,
         output_device: str,
         settings: ReverbSettings,
+        monitor_output: str | None = None,
     ) -> AudioStream:
-        if input_device not in self._input_ids or output_device not in self._output_ids:
+        if (
+            input_device not in self._input_ids
+            or output_device not in self._output_ids
+            or (monitor_output is not None and monitor_output not in self._output_ids)
+        ):
             self._refresh_devices()
         try:
             input_candidates = self._input_ids[input_device]
             output_candidates = self._output_ids[output_device]
+            monitor_candidates = (
+                self._output_ids[monitor_output]
+                if monitor_output is not None
+                else [(None, "")]
+            )
         except KeyError as exc:
             raise ValueError(
                 "O dispositivo selecionado não está mais disponível. "
@@ -150,57 +162,76 @@ class PedalboardBackend:
             ]
         )
         last_error: Exception | None = None
-        for input_id, _input_api in input_candidates:
-            for output_id, _output_api in output_candidates:
-                try:
-                    input_info = self._sd.query_devices(input_id)
-                    output_info = self._sd.query_devices(output_id)
-                    input_channels = min(2, int(input_info["max_input_channels"]))
-                    output_channels = min(2, int(output_info["max_output_channels"]))
-                    sample_rate = self._find_common_sample_rate(
-                        input_id,
-                        output_id,
-                        input_channels,
-                        output_channels,
-                        float(input_info["default_samplerate"]),
-                        float(output_info["default_samplerate"]),
+        combinations = product(input_candidates, output_candidates, monitor_candidates)
+        for input_candidate, output_candidate, monitor_candidate in combinations:
+            input_id, _input_api = input_candidate
+            output_id, _output_api = output_candidate
+            monitor_id, _monitor_api = monitor_candidate
+            try:
+                input_info = self._sd.query_devices(input_id)
+                input_channels = min(2, int(input_info["max_input_channels"]))
+                output_specs: list[tuple[int, int, float]] = []
+                for device_id in (output_id, monitor_id):
+                    if device_id is None:
+                        continue
+                    device_info = self._sd.query_devices(device_id)
+                    output_specs.append(
+                        (
+                            device_id,
+                            min(2, int(device_info["max_output_channels"])),
+                            float(device_info["default_samplerate"]),
+                        )
                     )
-                    stream = _SplitSoundDeviceStream(
-                        sounddevice=self._sd,
-                        numpy=self._np,
-                        input_id=input_id,
-                        output_id=output_id,
-                        sample_rate=sample_rate,
-                        input_channels=input_channels,
-                        output_channels=output_channels,
-                        processor=self._process_audio,
-                    )
-                except Exception as exc:
-                    last_error = exc
-                    continue
+                sample_rate = self._find_common_sample_rate(
+                    input_id,
+                    input_channels,
+                    float(input_info["default_samplerate"]),
+                    output_specs,
+                )
+                for block_size in (128, 256, 512):
+                    try:
+                        stream = _MultiOutputSoundDeviceStream(
+                            sounddevice=self._sd,
+                            input_id=input_id,
+                            outputs=[(item[0], item[1]) for item in output_specs],
+                            sample_rate=sample_rate,
+                            input_channels=input_channels,
+                            block_size=block_size,
+                            processor=self._process_audio,
+                        )
+                    except Exception as exc:
+                        last_error = exc
+                        continue
 
-                self._sample_rate = sample_rate
-                self._reverb = reverb
-                return stream
+                    self._sample_rate = sample_rate
+                    self._reverb = reverb
+                    return stream
+            except Exception as exc:
+                last_error = exc
+                continue
 
         self._effects = None
         details = f" Detalhes técnicos: {last_error}" if last_error else ""
         raise RuntimeError(
             f"Não foi possível abrir o microfone '{input_device}' com a saída "
-            f"'{output_device}'. Atualize os dispositivos ou escolha outra entrada."
+            f"'{output_device}'. Atualize os dispositivos ou escolha outra entrada. "
+            "Se o retorno estiver marcado, tente também outra saída de retorno."
             f"{details}"
         )
 
     def _find_common_sample_rate(
         self,
         input_id: int,
-        output_id: int,
         input_channels: int,
-        output_channels: int,
         input_default: float,
-        output_default: float,
+        output_specs: Sequence[tuple[int, int, float]],
     ) -> float:
-        candidates = [input_default, output_default, 48_000.0, 44_100.0]
+        candidates = [
+            input_default,
+            *(item[2] for item in output_specs),
+            48_000.0,
+            44_100.0,
+        ]
         tried: set[float] = set()
         for sample_rate in candidates:
             if sample_rate in tried:
@@ -213,12 +244,13 @@ class PedalboardBackend:
                     dtype="float32",
                     samplerate=sample_rate,
                 )
-                self._sd.check_output_settings(
-                    device=output_id,
-                    channels=output_channels,
-                    dtype="float32",
-                    samplerate=sample_rate,
-                )
+                for output_id, output_channels, _default_rate in output_specs:
+                    self._sd.check_output_settings(
+                        device=output_id,
+                        channels=output_channels,
+                        dtype="float32",
+                        samplerate=sample_rate,
+                    )
             except self._sd.PortAudioError:
                 continue
             return sample_rate
@@ -226,8 +258,8 @@ class PedalboardBackend:
             "Não foi encontrada uma taxa de amostragem comum entre a entrada e a saída."
         )
 
-    def _process_audio(self, indata, frames: int, output_channels: int):
-        output = self._np.zeros((frames, output_channels), dtype=self._np.float32)
+    def _process_audio(self, indata, frames: int):
+        output = self._np.zeros(frames, dtype=self._np.float32)
         if self._effects is None:
             return output
 
@@ -243,7 +275,7 @@ class PedalboardBackend:
         else:
             mono = processed[0]
         available = min(frames, mono.shape[0])
-        output[:available, :] = mono[:available, self._np.newaxis]
+        output[:available] = mono[:available]
         return output
 
     def update_reverb(self, settings: ReverbSettings) -> None:
@@ -254,83 +286,36 @@ class PedalboardBackend:
         self._reverb.wet_level = settings.wet_level
 
 
-class _SplitSoundDeviceStream:
-    """Bridge two independent audio devices through a small bounded buffer."""
+class _BufferedAudioOutput:
+    """Feed one output device while keeping queued latency strictly bounded."""
 
     def __init__(
         self,
         *,
         sounddevice,
-        numpy,
-        input_id: int,
         output_id: int,
         sample_rate: float,
-        input_channels: int,
         output_channels: int,
-        processor: Callable,
+        block_size: int,
     ) -> None:
         self._sd = sounddevice
-        self._np = numpy
-        self._processor = processor
-        self._output_channels = output_channels
-        self._block_size = 512
+        self._block_size = block_size
         self._chunks = deque()
         self._head_offset = 0
         self._queued_frames = 0
-        self._max_queued_frames = self._block_size * 12
+        self._max_queued_frames = self._block_size * 4
         self._queue_lock = threading.Lock()
-        self._stop_event = threading.Event()
-        self._error: Exception | None = None
-        self._input = sounddevice.InputStream(
-            device=input_id,
+        self.stream = sounddevice.OutputStream(
+            device=output_id,
             samplerate=sample_rate,
             blocksize=self._block_size,
-            channels=input_channels,
+            channels=output_channels,
             dtype="float32",
             latency="low",
-            callback=self._on_input,
+            callback=self._on_output,
         )
-        try:
-            self._output = sounddevice.OutputStream(
-                device=output_id,
-                samplerate=sample_rate,
-                blocksize=self._block_size,
-                channels=output_channels,
-                dtype="float32",
-                latency="low",
-                callback=self._on_output,
-            )
-        except Exception:
-            self._input.close()
-            raise
 
-    def run(self) -> None:
-        try:
-            self._input.start()
-            self._output.start()
-            while (
-                self._input.active
-                and self._output.active
-                and not self._stop_event.wait(0.1)
-            ):
-                pass
-        finally:
-            self._close_streams()
-        if self._error is not None:
-            raise RuntimeError(str(self._error)) from self._error
-
-    def close(self) -> None:
-        self._stop_event.set()
-        self._close_streams()
-
-    def _on_input(self, indata, frames, _time_info, _status) -> None:
-        try:
-            processed = self._processor(indata, frames, self._output_channels)
-        except Exception as exc:
-            self._error = exc
-            self._stop_event.set()
-            raise self._sd.CallbackAbort
-
+    def push(self, processed) -> None:
         with self._queue_lock:
             self._chunks.append(processed)
             self._queued_frames += processed.shape[0]
@@ -347,9 +332,8 @@ class _SplitSoundDeviceStream:
                 chunk = self._chunks[0]
                 available = chunk.shape[0] - self._head_offset
                 count = min(frames - written, available)
-                outdata[written : written + count] = chunk[
-                    self._head_offset : self._head_offset + count
-                ]
+                mono = chunk[self._head_offset : self._head_offset + count]
+                outdata[written : written + count, :] = mono[:, None]
                 written += count
                 self._head_offset += count
                 self._queued_frames -= count
@@ -357,8 +341,87 @@ class _SplitSoundDeviceStream:
                     self._chunks.popleft()
                     self._head_offset = 0
 
+
+class _MultiOutputSoundDeviceStream:
+    """Process one microphone once and feed the virtual cable plus monitoring."""
+
+    def __init__(
+        self,
+        *,
+        sounddevice,
+        input_id: int,
+        outputs: Sequence[tuple[int, int]],
+        sample_rate: float,
+        input_channels: int,
+        block_size: int,
+        processor: Callable,
+    ) -> None:
+        self._sd = sounddevice
+        self._processor = processor
+        self._stop_event = threading.Event()
+        self._first_audio = threading.Event()
+        self._error: Exception | None = None
+        self._outputs: list[_BufferedAudioOutput] = []
+        self._input = sounddevice.InputStream(
+            device=input_id,
+            samplerate=sample_rate,
+            blocksize=block_size,
+            channels=input_channels,
+            dtype="float32",
+            latency="low",
+            callback=self._on_input,
+        )
+        try:
+            for output_id, output_channels in outputs:
+                self._outputs.append(
+                    _BufferedAudioOutput(
+                        sounddevice=sounddevice,
+                        output_id=output_id,
+                        sample_rate=sample_rate,
+                        output_channels=output_channels,
+                        block_size=block_size,
+                    )
+                )
+        except Exception:
+            self._close_streams()
+            raise
+
+    def run(self) -> None:
+        try:
+            self._input.start()
+            self._first_audio.wait(timeout=0.05)
+            for output in self._outputs:
+                output.stream.start()
+            while (
+                self._input.active
+                and all(output.stream.active for output in self._outputs)
+                and not self._stop_event.wait(0.1)
+            ):
+                pass
+        finally:
+            self._close_streams()
+        if self._error is not None:
+            raise RuntimeError(str(self._error)) from self._error
+
+    def close(self) -> None:
+        self._stop_event.set()
+        self._close_streams()
+
+    def _on_input(self, indata, frames, _time_info, _status) -> None:
+        try:
+            processed = self._processor(indata, frames)
+        except Exception as exc:
+            self._error = exc
+            self._stop_event.set()
+            raise self._sd.CallbackAbort
+
+        for output in self._outputs:
+            output.push(processed)
+        self._first_audio.set()
+
     def _close_streams(self) -> None:
-        for stream in (self._input, self._output):
+        streams = [self._input, *(output.stream for output in self._outputs)]
+        for stream in streams:
             try:
                 if not stream.closed:
                     stream.abort()
@@ -410,9 +473,15 @@ class AudioEngine:
         with self._lock:
             self._on_error = handler
 
-    def start(self, input_device: str, output_device: str) -> None:
+    def start(
+        self,
+        input_device: str,
+        output_device: str,
+        monitor_output: str | None = None,
+    ) -> None:
         input_device = input_device.strip()
         output_device = output_device.strip()
+        monitor_output = monitor_output.strip() if monitor_output else None
         if not input_device:
             raise ValueError("Selecione um microfone de entrada.")
         if not output_device:
@@ -422,6 +491,14 @@ class AudioEngine:
                 "A entrada e a saída não podem ser o mesmo dispositivo; "
                 "isso causaria microfonia."
             )
+        if monitor_output == output_device:
+            raise ValueError(
+                "A saída de retorno deve ser diferente da saída virtual."
+            )
+        if monitor_output == input_device:
+            raise ValueError(
+                "O retorno não pode usar o mesmo dispositivo de entrada."
+            )
 
         with self._lock:
             if self._stream is not None:
@@ -430,6 +507,7 @@ class AudioEngine:
                 input_device,
                 output_device,
                 self._settings,
+                monitor_output,
             )
             self._stream = stream
             self._stopping = False

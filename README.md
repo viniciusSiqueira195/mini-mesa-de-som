@@ -25,6 +25,19 @@ O único ajuste do efeito é **Nível de reverb**, de 0 a 100. Internamente, ess
 controle equilibra a quantidade do efeito, o tamanho do ambiente simulado e a
 duração da cauda. Não é necessário configurar parâmetros técnicos separados.
 
+## Retorno da própria voz
+
+Marque **Ouvir retorno** e escolha o fone ou dispositivo em que deseja escutar
+a voz processada. A saída virtual continua alimentando o Discord, TeamTalk ou
+WhatsApp ao mesmo tempo. Use preferencialmente fones; retornar o microfone para
+caixas de som pode provocar microfonia.
+
+A mesa tenta blocos de 128 amostras e aumenta para 256 ou 512 somente quando o
+driver não aceita o modo mais rápido. O buffer é mantido curto e descarta áudio
+antigo antes de deixar o atraso crescer. Ainda existe uma pequena latência de
+captura, processamento e reprodução; retorno com reverb não pode ser literalmente
+instantâneo.
+
 Evite selecionar caixas de som como saída enquanto elas estiverem próximas do
 microfone: isso pode produzir microfonia.
 
@@ -58,6 +71,8 @@ mini-mesa
 
 - `Alt+M`: escolher o microfone.
 - `Alt+S`: escolher a saída virtual.
+- `Alt+O`: ativar ou desativar o retorno.
+- `Alt+T`: escolher o dispositivo de retorno.
 - `Alt+R`: ajustar o nível de reverb.
 - `Alt+A`: ativar ou desativar o processamento.
 - `F5`: atualizar a lista de dispositivos.

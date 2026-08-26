@@ -8,7 +8,7 @@ from .settings import ReverbSettings
 
 class MainFrame(wx.Frame):
     def __init__(self, engine: AudioEngine) -> None:
-        super().__init__(None, title="Mini Mesa de Som Teste", size=(590, 390))
+        super().__init__(None, title="Mini Mesa de Som Teste", size=(590, 500))
         self.engine = engine
         self.engine.set_error_handler(self._on_audio_error)
 
@@ -38,6 +38,18 @@ class MainFrame(wx.Frame):
         self.output_choice.SetName("Saída virtual para Discord ou TeamTalk")
         devices.Add(output_label, 0, wx.LEFT | wx.RIGHT, 8)
         devices.Add(self.output_choice, 0, wx.ALL | wx.EXPAND, 8)
+
+        self.monitor_checkbox = wx.CheckBox(panel, label="&Ouvir retorno")
+        self.monitor_checkbox.SetName("Ouvir retorno do microfone processado")
+        self.monitor_checkbox.Bind(wx.EVT_CHECKBOX, self._on_monitor_toggled)
+        devices.Add(self.monitor_checkbox, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 8)
+
+        monitor_label = wx.StaticText(panel, label="Dispositivo de re&torno:")
+        self.monitor_choice = wx.Choice(panel)
+        self.monitor_choice.SetName("Dispositivo para ouvir o retorno")
+        self.monitor_choice.Disable()
+        devices.Add(monitor_label, 0, wx.LEFT | wx.RIGHT, 8)
+        devices.Add(self.monitor_choice, 0, wx.ALL | wx.EXPAND, 8)
 
         self.refresh_button = wx.Button(panel, label="Atualizar dispositivos (F5)")
         self.refresh_button.Bind(wx.EVT_BUTTON, self._on_refresh)
@@ -93,6 +105,7 @@ class MainFrame(wx.Frame):
     def _refresh_devices(self) -> None:
         selected_input = self.input_choice.GetStringSelection()
         selected_output = self.output_choice.GetStringSelection()
+        selected_monitor = self.monitor_choice.GetStringSelection()
         try:
             inputs = self.engine.input_devices()
             outputs = self.engine.output_devices()
@@ -112,6 +125,12 @@ class MainFrame(wx.Frame):
             selected_output,
             prefer_virtual=True,
         )
+        self._replace_choices(
+            self.monitor_choice,
+            outputs,
+            selected_monitor,
+            prefer_physical_output=True,
+        )
         self.SetStatusText(
             f"{len(inputs)} entradas e {len(outputs)} saídas encontradas."
         )
@@ -123,6 +142,7 @@ class MainFrame(wx.Frame):
         previous: str,
         *,
         prefer_physical_input: bool = False,
+        prefer_physical_output: bool = False,
         prefer_virtual: bool = False,
     ) -> None:
         choice.Set(values)
@@ -135,6 +155,24 @@ class MainFrame(wx.Frame):
                     for value in values
                     if "microfone" in value.casefold()
                     and "virtual" not in value.casefold()
+                ),
+                None,
+            )
+            if preferred is not None:
+                choice.SetStringSelection(preferred)
+            elif values:
+                choice.SetSelection(0)
+        elif prefer_physical_output:
+            preferred = next(
+                (
+                    value
+                    for value in values
+                    if "virtual" not in value.casefold()
+                    and (
+                        "alto-falantes" in value.casefold()
+                        or "fone" in value.casefold()
+                        or "headphone" in value.casefold()
+                    )
                 ),
                 None,
             )
@@ -162,6 +200,22 @@ class MainFrame(wx.Frame):
     def _current_settings(self) -> ReverbSettings:
         return ReverbSettings(level_percent=self.reverb_level.GetValue())
 
+    def _on_monitor_toggled(self, _event: wx.Event) -> None:
+        enabled = self.monitor_checkbox.GetValue()
+        self.monitor_choice.Enable(enabled)
+        self.SetStatusText(
+            "Retorno ativado; escolha onde deseja ouvir sua voz."
+            if enabled
+            else "Retorno desativado."
+        )
+
+    def _set_routing_controls_enabled(self, enabled: bool) -> None:
+        self.input_choice.Enable(enabled)
+        self.output_choice.Enable(enabled)
+        self.monitor_checkbox.Enable(enabled)
+        self.monitor_choice.Enable(enabled and self.monitor_checkbox.GetValue())
+        self.refresh_button.Enable(enabled)
+
     def _on_settings_changed(self, event: wx.Event) -> None:
         try:
             self.engine.update_settings(self._current_settings())
@@ -175,6 +229,7 @@ class MainFrame(wx.Frame):
     def _on_toggle(self, _event: wx.Event) -> None:
         if self.engine.is_running:
             self.engine.stop()
+            self._set_routing_controls_enabled(True)
             self.toggle_button.SetLabel("&Ativar reverb")
             self.status.ChangeValue("Desativado.")
             self.SetStatusText("Processamento desativado.")
@@ -185,14 +240,21 @@ class MainFrame(wx.Frame):
             self.engine.start(
                 self.input_choice.GetStringSelection(),
                 self.output_choice.GetStringSelection(),
+                (
+                    self.monitor_choice.GetStringSelection()
+                    if self.monitor_checkbox.GetValue()
+                    else None
+                ),
             )
         except Exception as exc:
             self._show_error(str(exc))
             return
 
+        self._set_routing_controls_enabled(False)
         self.toggle_button.SetLabel("Des&ativar reverb")
         self.status.ChangeValue(
-            "Ativo. O áudio processado está sendo enviado para a saída selecionada."
+            "Ativo. O áudio processado está sendo enviado para a saída virtual"
+            + (" e para o retorno." if self.monitor_checkbox.GetValue() else ".")
         )
         self.SetStatusText("Reverb ativo.")
 
@@ -202,6 +264,7 @@ class MainFrame(wx.Frame):
     def _handle_audio_error(self, message: str) -> None:
         if self.IsBeingDeleted():
             return
+        self._set_routing_controls_enabled(True)
         self.toggle_button.SetLabel("&Ativar reverb")
         self.status.ChangeValue("Desativado após uma falha no dispositivo.")
         self._show_error(f"O processamento de áudio foi interrompido.\n\n{message}")
