@@ -7,6 +7,7 @@ import numpy as np
 
 from mini_mesa.audio_engine import (
     AudioEngine,
+    PedalboardBackend,
     _BufferedAudioOutput,
     _MultiOutputSoundDeviceStream,
     _normalize_device_label,
@@ -36,6 +37,7 @@ class FakeBackend:
         self.created_with: tuple[str, str, ReverbSettings, str | None] | None = None
         self.updated_with: ReverbSettings | None = None
         self.updated_monitors: list[str | None] = []
+        self.noise_reduction_enabled = False
 
     def input_devices(self) -> tuple[str, ...]:
         return ("FIFINE AM8", "Zeus X")
@@ -61,6 +63,9 @@ class FakeBackend:
 
     def update_monitor(self, monitor_output: str | None) -> None:
         self.updated_monitors.append(monitor_output)
+
+    def update_noise_reduction(self, enabled: bool) -> None:
+        self.noise_reduction_enabled = enabled
 
 
 class FakeOutputStream:
@@ -178,6 +183,35 @@ class MultiOutputStreamTests(unittest.TestCase):
         self.assertTrue(monitor.stream.closed)
 
 
+class PedalboardProcessingTests(unittest.TestCase):
+    def test_noise_reduction_runs_before_reverb_effects(self) -> None:
+        class FakeNoiseReducer:
+            @staticmethod
+            def process(samples):
+                return samples * 0.5
+
+        class RecordingEffects:
+            received = None
+
+            def process(self, samples, _sample_rate, **_kwargs):
+                self.received = samples.copy()
+                return samples
+
+        effects = RecordingEffects()
+        backend = object.__new__(PedalboardBackend)
+        backend._np = np
+        backend._effects = effects
+        backend._noise_reducer = FakeNoiseReducer()
+        backend._sample_rate = 48_000.0
+        backend._processing_lock = threading.Lock()
+        microphone = np.full((4, 1), 0.8, dtype=np.float32)
+
+        output = backend._process_audio(microphone, 4)
+
+        np.testing.assert_allclose(effects.received, np.full((1, 4), 0.4))
+        np.testing.assert_allclose(output, np.full(4, 0.4))
+
+
 class AudioEngineTests(unittest.TestCase):
     def test_windows_instance_prefixes_do_not_duplicate_the_same_microphone(self) -> None:
         self.assertEqual(
@@ -247,6 +281,27 @@ class AudioEngineTests(unittest.TestCase):
         self.assertEqual(backend.updated_monitors, ["Alto-falantes"])
         self.assertTrue(engine.is_running)
         self.assertFalse(backend.stream.closed.is_set())
+        engine.stop()
+
+    def test_noise_reduction_is_configured_before_starting(self) -> None:
+        backend = FakeBackend()
+        engine = AudioEngine(backend)
+
+        engine.update_noise_reduction(True)
+
+        self.assertTrue(backend.noise_reduction_enabled)
+
+    def test_noise_reduction_cannot_change_while_audio_is_running(self) -> None:
+        backend = FakeBackend()
+        engine = AudioEngine(backend)
+        engine.start("Zeus X", "CABLE Input")
+        self.assertTrue(backend.stream.started.wait(timeout=1))
+
+        with self.assertRaisesRegex(RuntimeError, "Desative a mesa"):
+            engine.update_noise_reduction(True)
+
+        self.assertFalse(backend.noise_reduction_enabled)
+        self.assertTrue(engine.is_running)
         engine.stop()
 
     def test_monitor_and_virtual_output_must_be_different(self) -> None:

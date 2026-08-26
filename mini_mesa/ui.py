@@ -13,7 +13,7 @@ class MainFrame(wx.Frame):
         engine: AudioEngine,
         preferences_store: PreferencesStore | None = None,
     ) -> None:
-        super().__init__(None, title="Mini Mesa de Som Teste", size=(590, 540))
+        super().__init__(None, title="Mini Mesa de Som Teste", size=(590, 600))
         self.engine = engine
         self.engine.set_error_handler(self._on_audio_error)
         self.preferences_store = preferences_store or PreferencesStore()
@@ -87,6 +87,34 @@ class MainFrame(wx.Frame):
         effect.Add(level_label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
         effect.Add(self.reverb_level, 0, wx.ALL | wx.EXPAND, 8)
         root.Add(effect, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
+
+        noise_reduction = wx.StaticBoxSizer(
+            wx.VERTICAL, panel, "Redução de ruído"
+        )
+        self.noise_reduction_checkbox = wx.CheckBox(
+            panel, label="Ativar redução de ruí&do profissional"
+        )
+        self.noise_reduction_checkbox.SetName(
+            "Ativar redução de ruído profissional no microfone"
+        )
+        self.noise_reduction_checkbox.SetValue(
+            self.preferences.noise_reduction_enabled
+        )
+        self.noise_reduction_checkbox.Bind(
+            wx.EVT_CHECKBOX, self._on_noise_reduction_toggled
+        )
+        noise_reduction.Add(
+            self.noise_reduction_checkbox,
+            0,
+            wx.LEFT | wx.RIGHT | wx.TOP | wx.BOTTOM,
+            8,
+        )
+        root.Add(
+            noise_reduction,
+            0,
+            wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND,
+            12,
+        )
 
         actions = wx.BoxSizer(wx.HORIZONTAL)
         self.toggle_button = wx.Button(panel, label="&Ativar mesa")
@@ -243,6 +271,7 @@ class MainFrame(wx.Frame):
             monitor_device=self.monitor_choice.GetStringSelection(),
             reverb_enabled=self.reverb_checkbox.GetValue(),
             reverb_level=self.reverb_level.GetValue(),
+            noise_reduction_enabled=self.noise_reduction_checkbox.GetValue(),
         )
 
     def _save_preferences(self) -> None:
@@ -279,6 +308,7 @@ class MainFrame(wx.Frame):
         self.monitor_checkbox.Enable()
         self.monitor_choice.Enable(self.monitor_checkbox.GetValue())
         self.refresh_button.Enable(enabled)
+        self.noise_reduction_checkbox.Enable(enabled)
 
     def _selected_monitor_output(self) -> str | None:
         if not self.monitor_checkbox.GetValue():
@@ -294,6 +324,9 @@ class MainFrame(wx.Frame):
         return self.preferences.monitor_device or None
 
     def _start_route(self, monitor_output: str | None) -> None:
+        self.engine.update_noise_reduction(
+            self.noise_reduction_checkbox.GetValue()
+        )
         self.engine.update_settings(self._current_settings())
         self.engine.start(
             self.input_choice.GetStringSelection(),
@@ -306,14 +339,21 @@ class MainFrame(wx.Frame):
 
     def _show_running_state(self) -> None:
         monitoring = self.monitor_checkbox.GetValue()
+        effects = []
+        if self.noise_reduction_checkbox.GetValue():
+            effects.append("redução de ruído")
+        if self.reverb_checkbox.GetValue():
+            effects.append("reverb")
+        effect_description = " e ".join(effects) if effects else "nenhum efeito"
         self.status.ChangeValue(
             "Mesa ativa. O áudio está sendo enviado para a saída virtual"
             + (" e para o retorno." if monitoring else ".")
+            + f" Efeitos ativos: {effect_description}."
         )
         self.SetStatusText(
-            "Mesa ativa com reverb."
-            if self.reverb_checkbox.GetValue()
-            else "Mesa ativa sem reverb."
+            f"Mesa ativa com {effect_description}."
+            if effects
+            else "Mesa ativa sem efeitos."
         )
 
     def _update_running_monitor(self, previous_monitor: str | None) -> None:
@@ -343,7 +383,9 @@ class MainFrame(wx.Frame):
             self.reverb_level.Enable(reverb_enabled)
             self.engine.update_settings(self._current_settings())
             self._save_preferences()
-            if reverb_enabled:
+            if self.engine.is_running:
+                self._show_running_state()
+            elif reverb_enabled:
                 self.SetStatusText(
                     f"Reverb ativo em {self.reverb_level.GetValue()} por cento."
                 )
@@ -351,6 +393,15 @@ class MainFrame(wx.Frame):
                 self.SetStatusText("Reverb desativado; a mesa continua funcionando.")
         except (TypeError, ValueError):
             pass
+        event.Skip()
+
+    def _on_noise_reduction_toggled(self, event: wx.Event) -> None:
+        self._save_preferences()
+        self.SetStatusText(
+            "Redução de ruído será ativada junto com a mesa."
+            if self.noise_reduction_checkbox.GetValue()
+            else "Redução de ruído desativada."
+        )
         event.Skip()
 
     def _on_toggle(self, _event: wx.Event) -> None:

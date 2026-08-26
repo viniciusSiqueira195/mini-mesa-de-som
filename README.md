@@ -33,13 +33,30 @@ desligá-lo, a voz limpa continua sendo enviada normalmente para a saída virtua
 Isso permite acrescentar outros efeitos independentes no futuro sem interromper
 todo o fluxo de áudio.
 
+## Redução de ruído
+
+**Ativar redução de ruído profissional** usa o RNNoise para reduzir ruídos de
+fundo na voz antes dos outros efeitos. A opção fica desmarcada por padrão. Ela
+pode ser combinada livremente com o reverb:
+
+```text
+Microfone -> redução de ruído opcional -> reverb opcional -> limitador -> saídas
+```
+
+O RNNoise funciona localmente, sem enviar áudio para a internet, e acrescenta um
+quadro fixo de 10 milissegundos ao processamento. Como ele exige áudio em 48 kHz,
+a configuração só pode ser alterada enquanto a mesa estiver desativada. Isso não
+impede usar redução e reverb juntos; basta marcar os efeitos desejados antes de
+ativar a mesa.
+
 O botão **Desativar mesa** interrompe somente a transmissão de áudio e mantém a
 janela aberta. Use **Encerrar programa** para parar o áudio e fechar a Mini Mesa.
 
 ## Preferências
 
 A Mini Mesa guarda automaticamente em JSON o microfone, a saída virtual, o
-retorno, o estado do reverb e seu nível. No Windows, o arquivo fica em
+retorno, o estado do reverb, seu nível e a redução de ruído. No Windows, o
+arquivo fica em
 `%APPDATA%\Mini Mesa de Som Teste\preferences.json`. A gravação é feita primeiro
 em um arquivo temporário para reduzir o risco de corrupção. Se o JSON estiver
 inválido ou um dispositivo salvo não estiver mais conectado, a mesa inicia com
@@ -105,6 +122,7 @@ mini-mesa
 - `Alt+T`: escolher o dispositivo de retorno.
 - `Alt+E`: ativar ou desativar somente o efeito de reverb.
 - `Alt+R`: ajustar o nível de reverb.
+- `Alt+D`: ativar ou desativar a redução de ruído, com a mesa parada.
 - `Alt+A`: ativar ou desativar a mesa.
 - `Alt+C`: encerrar o programa.
 - `F5`: atualizar a lista de dispositivos.
@@ -120,8 +138,8 @@ python -m unittest discover -s tests -v
 ## Estado atual
 
 Este é um MVP. Ele usa PortAudio para selecionar os dispositivos por
-identificadores estáveis e Pedalboard para processar o reverb em código nativo.
-Ele já separa a interface do motor de áudio, permite trocar o microfone sem
-alterar o código, protege contra duas transmissões simultâneas e mantém as
-preferências em JSON. Medidor de nível, presets, novos efeitos e empacotamento
-são possíveis próximas etapas.
+identificadores estáveis, Pedalboard para o reverb e RNNoise para redução neural
+de ruído local. Ele já separa a interface do motor de áudio, permite trocar o
+microfone sem alterar o código, protege contra duas transmissões simultâneas e
+mantém as preferências em JSON. Medidor de nível, presets, novos efeitos e
+empacotamento são possíveis próximas etapas.

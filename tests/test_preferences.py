@@ -20,13 +20,14 @@ class PreferencesStoreTests(unittest.TestCase):
                 monitor_device="Fones",
                 reverb_enabled=False,
                 reverb_level=72,
+                noise_reduction_enabled=True,
             )
 
             store.save(expected)
 
             self.assertEqual(store.load(), expected)
             saved = json.loads(path.read_text(encoding="utf-8"))
-            self.assertEqual(saved["schema_version"], 1)
+            self.assertEqual(saved["schema_version"], 2)
             self.assertEqual(saved["input_device"], "Microfone Áudio")
 
     def test_invalid_file_falls_back_to_defaults(self) -> None:
@@ -43,6 +44,7 @@ class PreferencesStoreTests(unittest.TestCase):
                 "monitor_enabled": "sim",
                 "reverb_enabled": False,
                 "reverb_level": 500,
+                "noise_reduction_enabled": True,
             }
         )
 
@@ -50,6 +52,7 @@ class PreferencesStoreTests(unittest.TestCase):
         self.assertFalse(preferences.monitor_enabled)
         self.assertFalse(preferences.reverb_enabled)
         self.assertEqual(preferences.reverb_level, 25)
+        self.assertTrue(preferences.noise_reduction_enabled)
 
 
 if __name__ == "__main__":

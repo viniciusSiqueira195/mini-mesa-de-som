@@ -7,6 +7,7 @@ from collections.abc import Callable, Sequence
 from itertools import product
 from typing import Protocol
 
+from .noise_reduction import RNNOISE_SAMPLE_RATE, RNNoiseReducer
 from .settings import ReverbSettings
 
 
@@ -60,6 +61,8 @@ class AudioBackend(Protocol):
 
     def update_monitor(self, monitor_output: str | None) -> None: ...
 
+    def update_noise_reduction(self, enabled: bool) -> None: ...
+
 
 class PedalboardBackend:
     """PortAudio routing with native DSP powered by Spotify's Pedalboard."""
@@ -83,6 +86,9 @@ class PedalboardBackend:
         self._reverb = None
         self._effects = None
         self._active_stream: _MultiOutputSoundDeviceStream | None = None
+        self._noise_reduction_enabled = False
+        self._noise_reducer: RNNoiseReducer | None = None
+        self._processing_lock = threading.Lock()
         self._sample_rate = 48_000.0
         self._input_ids: dict[str, list[tuple[int, str]]] = {}
         self._output_ids: dict[str, list[tuple[int, str]]] = {}
@@ -247,6 +253,8 @@ class PedalboardBackend:
 
                     self._sample_rate = sample_rate
                     self._reverb = reverb
+                    with self._processing_lock:
+                        self._replace_noise_reducer()
                     self._active_stream = stream
                     return stream
             except Exception as exc:
@@ -269,12 +277,16 @@ class PedalboardBackend:
         input_default: float,
         output_specs: Sequence[tuple[int, int, float]],
     ) -> float:
-        candidates = [
-            input_default,
-            *(item[2] for item in output_specs),
-            48_000.0,
-            44_100.0,
-        ]
+        candidates = (
+            [float(RNNOISE_SAMPLE_RATE)]
+            if self._noise_reduction_enabled
+            else [
+                input_default,
+                *(item[2] for item in output_specs),
+                48_000.0,
+                44_100.0,
+            ]
+        )
         tried: set[float] = set()
         for sample_rate in candidates:
             if sample_rate in tried:
@@ -303,16 +315,19 @@ class PedalboardBackend:
 
     def _process_audio(self, indata, frames: int):
         output = self._np.zeros(frames, dtype=self._np.float32)
-        if self._effects is None:
-            return output
+        with self._processing_lock:
+            if self._effects is None:
+                return output
 
-        mono_input = self._np.mean(indata, axis=1, dtype=self._np.float32)
-        processed = self._effects.process(
-            mono_input[self._np.newaxis, :],
-            self._sample_rate,
-            buffer_size=frames,
-            reset=False,
-        )
+            mono_input = self._np.mean(indata, axis=1, dtype=self._np.float32)
+            if self._noise_reducer is not None:
+                mono_input = self._noise_reducer.process(mono_input)
+            processed = self._effects.process(
+                mono_input[self._np.newaxis, :],
+                self._sample_rate,
+                buffer_size=frames,
+                reset=False,
+            )
         if processed.ndim == 1:
             mono = processed
         else:
@@ -322,12 +337,26 @@ class PedalboardBackend:
         return output
 
     def update_reverb(self, settings: ReverbSettings) -> None:
-        if self._reverb is None:
-            return
-        self._reverb.room_size = settings.room_size
-        self._reverb.damping = settings.damping
-        self._reverb.wet_level = settings.wet_level
-        self._reverb.dry_level = settings.dry_level
+        with self._processing_lock:
+            if self._reverb is None:
+                return
+            self._reverb.room_size = settings.room_size
+            self._reverb.damping = settings.damping
+            self._reverb.wet_level = settings.wet_level
+            self._reverb.dry_level = settings.dry_level
+
+    def update_noise_reduction(self, enabled: bool) -> None:
+        if not isinstance(enabled, bool):
+            raise TypeError("Estado da redução de ruído deve ser verdadeiro ou falso.")
+        self._noise_reduction_enabled = enabled
+
+    def _replace_noise_reducer(self) -> None:
+        previous = self._noise_reducer
+        self._noise_reducer = (
+            RNNoiseReducer() if self._noise_reduction_enabled else None
+        )
+        if previous is not None:
+            previous.close()
 
     def update_monitor(self, monitor_output: str | None) -> None:
         stream = self._active_stream
@@ -689,6 +718,7 @@ class AudioEngine:
         self._input_device: str | None = None
         self._output_device: str | None = None
         self._monitor_output: str | None = None
+        self._noise_reduction_enabled = False
         self._stopping = False
         self._lock = threading.RLock()
 
@@ -788,6 +818,17 @@ class AudioEngine:
                 return
             self._backend.update_monitor(monitor_output)
             self._monitor_output = monitor_output
+
+    def update_noise_reduction(self, enabled: bool) -> None:
+        if not isinstance(enabled, bool):
+            raise TypeError("Estado da redução de ruído deve ser verdadeiro ou falso.")
+        with self._lock:
+            if self._stream is not None:
+                raise RuntimeError(
+                    "Desative a mesa antes de alterar a redução de ruído."
+                )
+            self._backend.update_noise_reduction(enabled)
+            self._noise_reduction_enabled = enabled
 
     def stop(self, *, timeout: float = 2.0) -> None:
         with self._lock:

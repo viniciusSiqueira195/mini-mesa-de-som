@@ -25,6 +25,7 @@ class AppPreferences:
     monitor_device: str = ""
     reverb_enabled: bool = True
     reverb_level: int = 25
+    noise_reduction_enabled: bool = False
 
     @classmethod
     def from_dict(cls, data: object) -> AppPreferences:
@@ -54,6 +55,9 @@ class AppPreferences:
             monitor_device=text_value("monitor_device", defaults.monitor_device),
             reverb_enabled=bool_value("reverb_enabled", defaults.reverb_enabled),
             reverb_level=level,
+            noise_reduction_enabled=bool_value(
+                "noise_reduction_enabled", defaults.noise_reduction_enabled
+            ),
         )
 
 
@@ -74,7 +78,7 @@ class PreferencesStore:
         try:
             with temporary_path.open("w", encoding="utf-8", newline="\n") as output:
                 json.dump(
-                    {"schema_version": 1, **asdict(preferences)},
+                    {"schema_version": 2, **asdict(preferences)},
                     output,
                     ensure_ascii=False,
                     indent=2,
