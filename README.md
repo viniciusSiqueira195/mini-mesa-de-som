@@ -24,6 +24,7 @@ entradas reconhecidas pelo Windows podem ser selecionadas diretamente.
 - Seleção independente do microfone, cabo virtual e dispositivo de retorno.
 - Reverb ajustado por um único controle simples de 0 a 100.
 - Redução neural de ruído RNNoise, opcional e executada localmente.
+- Áudio espacial binaural com HRTF real e posição horizontal de −180° a +180°.
 - Reverb e redução de ruído utilizáveis separadamente ou em conjunto.
 - Retorno da própria voz sem depender da opção “Escutar este dispositivo” do
   Windows.
@@ -38,6 +39,7 @@ entradas reconhecidas pelo Windows podem ser selecionadas diretamente.
 Microfone físico
     -> redução de ruído opcional
     -> reverb opcional
+    -> HRTF binaural opcional
     -> limitador
     -> cabo de áudio virtual
     -> Discord, TeamTalk, WhatsApp ou outro aplicativo
@@ -98,6 +100,19 @@ internet. A opção fica desmarcada por padrão, requer processamento em 48 kHz 
 adiciona um quadro fixo de 10 milissegundos. Para preservar a continuidade do
 áudio, altere essa opção com a mesa desativada.
 
+### Áudio espacial binaural
+
+O efeito espacial usa respostas de impulso medidas no manequim acústico KEMAR
+do MIT. Um único controle posiciona a voz ao redor da cabeça: valores negativos
+movem para a esquerda, `0` fica à frente e valores positivos movem para a
+direita. As posições intermediárias são interpoladas e qualquer mudança é
+suavizada para evitar cliques. O efeito pode ser ligado, desligado e movido
+enquanto a mesa está ativa.
+
+O resultado foi feito para audição em fones e precisa permanecer estéreo até o
+ouvinte. Aplicativos de conversa que transformem o microfone em mono eliminarão
+boa parte ou todo o efeito; use **Ouvir retorno** para avaliá-lo diretamente.
+
 ## Atalhos
 
 - `Alt+M`: escolher o microfone.
@@ -107,6 +122,8 @@ adiciona um quadro fixo de 10 milissegundos. Para preservar a continuidade do
 - `Alt+E`: ativar ou desativar o reverb.
 - `Alt+R`: ajustar o nível de reverb.
 - `Alt+D`: ativar ou desativar a redução de ruído.
+- `Alt+P`: ativar ou desativar o áudio espacial.
+- `Alt+I`: ajustar a posição espacial da voz.
 - `Alt+A`: ativar ou desativar a mesa.
 - `Alt+C`: encerrar o programa.
 - `F5`: atualizar os dispositivos.
@@ -148,15 +165,16 @@ microfones físicos.
 ## Arquitetura
 
 - `mini_mesa/ui.py`: janela wxPython e comportamento acessível.
-- `mini_mesa/audio_engine.py`: dispositivos, ciclo da transmissão e DSP.
+- `mini_mesa/audio_engine.py`: dispositivos, ciclo da transmissão e cadeia DSP.
 - `mini_mesa/noise_reduction.py`: adaptação de streaming e RNNoise nativo.
+- `mini_mesa/spatial_audio.py`: convolução binaural, interpolação e transições.
 - `mini_mesa/preferences.py`: persistência JSON atômica.
 - `mini_mesa/settings.py`: mapeamento seguro dos controles de efeito.
 - `tests/`: testes automatizados do motor e das configurações.
 
 ## Próximos passos
 
-- Protótipo de áudio espacial binaural com HRTF.
+- Testes auditivos do HRTF em diferentes cabos virtuais e aplicativos.
 - Medidor de nível acessível.
 - Presets de efeitos.
 - Empacotamento para usuários sem ambiente Python.
@@ -166,5 +184,7 @@ microfones físicos.
 - [Pedalboard](https://github.com/spotify/pedalboard), usado para reverb e
   limitação.
 - [RNNoise](https://github.com/xiph/rnnoise), usado para redução neural de ruído.
+- [MIT KEMAR HRTF](https://sound.media.mit.edu/resources/KEMAR.html), medições
+  binaurais de Bill Gardner e Keith Martin usadas pelo áudio espacial.
 - [PortAudio](https://www.portaudio.com/) por meio do sounddevice.
 - [wxPython](https://wxpython.org/) na interface nativa.

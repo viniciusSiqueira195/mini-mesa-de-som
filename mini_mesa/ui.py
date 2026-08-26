@@ -4,7 +4,7 @@ import wx
 
 from .audio_engine import AudioDependencyError, AudioEngine
 from .preferences import AppPreferences, PreferencesStore
-from .settings import ReverbSettings
+from .settings import ReverbSettings, SpatialSettings
 
 
 class MainFrame(wx.Frame):
@@ -13,7 +13,7 @@ class MainFrame(wx.Frame):
         engine: AudioEngine,
         preferences_store: PreferencesStore | None = None,
     ) -> None:
-        super().__init__(None, title="Mini Mesa de Som Teste", size=(590, 600))
+        super().__init__(None, title="Mini Mesa de Som Teste", size=(620, 750))
         self.engine = engine
         self.engine.set_error_handler(self._on_audio_error)
         self.preferences_store = preferences_store or PreferencesStore()
@@ -115,6 +115,35 @@ class MainFrame(wx.Frame):
             wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND,
             12,
         )
+
+        spatial = wx.StaticBoxSizer(wx.VERTICAL, panel, "Áudio espacial binaural")
+        self.spatial_checkbox = wx.CheckBox(
+            panel, label="Ativar áudio es&pacial 3D com HRTF"
+        )
+        self.spatial_checkbox.SetName("Ativar áudio espacial binaural com HRTF")
+        self.spatial_checkbox.SetValue(self.preferences.spatial_enabled)
+        self.spatial_checkbox.Bind(wx.EVT_CHECKBOX, self._on_spatial_changed)
+        spatial_label = wx.StaticText(
+            panel,
+            label="Pos&ição da voz em graus: -180 atrás, 0 frente, 180 atrás",
+        )
+        self.spatial_angle = wx.Slider(
+            panel,
+            value=self.preferences.spatial_angle,
+            minValue=-180,
+            maxValue=180,
+            style=wx.SL_HORIZONTAL | wx.SL_LABELS,
+        )
+        self.spatial_angle.SetName(
+            "Posição espacial da voz; valores negativos ficam à esquerda e "
+            "positivos à direita"
+        )
+        self.spatial_angle.Enable(self.preferences.spatial_enabled)
+        self.spatial_angle.Bind(wx.EVT_SLIDER, self._on_spatial_changed)
+        spatial.Add(self.spatial_checkbox, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
+        spatial.Add(spatial_label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
+        spatial.Add(self.spatial_angle, 0, wx.ALL | wx.EXPAND, 8)
+        root.Add(spatial, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
 
         actions = wx.BoxSizer(wx.HORIZONTAL)
         self.toggle_button = wx.Button(panel, label="&Ativar mesa")
@@ -272,6 +301,14 @@ class MainFrame(wx.Frame):
             reverb_enabled=self.reverb_checkbox.GetValue(),
             reverb_level=self.reverb_level.GetValue(),
             noise_reduction_enabled=self.noise_reduction_checkbox.GetValue(),
+            spatial_enabled=self.spatial_checkbox.GetValue(),
+            spatial_angle=self.spatial_angle.GetValue(),
+        )
+
+    def _current_spatial_settings(self) -> SpatialSettings:
+        return SpatialSettings(
+            enabled=self.spatial_checkbox.GetValue(),
+            angle_degrees=self.spatial_angle.GetValue(),
         )
 
     def _save_preferences(self) -> None:
@@ -328,6 +365,7 @@ class MainFrame(wx.Frame):
             self.noise_reduction_checkbox.GetValue()
         )
         self.engine.update_settings(self._current_settings())
+        self.engine.update_spatial(self._current_spatial_settings())
         self.engine.start(
             self.input_choice.GetStringSelection(),
             self.output_choice.GetStringSelection(),
@@ -344,6 +382,10 @@ class MainFrame(wx.Frame):
             effects.append("redução de ruído")
         if self.reverb_checkbox.GetValue():
             effects.append("reverb")
+        if self.spatial_checkbox.GetValue():
+            effects.append(
+                f"áudio espacial em {self.spatial_angle.GetValue()} graus"
+            )
         effect_description = " e ".join(effects) if effects else "nenhum efeito"
         self.status.ChangeValue(
             "Mesa ativa. O áudio está sendo enviado para a saída virtual"
@@ -402,6 +444,25 @@ class MainFrame(wx.Frame):
             if self.noise_reduction_checkbox.GetValue()
             else "Redução de ruído desativada."
         )
+        event.Skip()
+
+    def _on_spatial_changed(self, event: wx.Event) -> None:
+        try:
+            enabled = self.spatial_checkbox.GetValue()
+            self.spatial_angle.Enable(enabled)
+            settings = self._current_spatial_settings()
+            self.engine.update_spatial(settings)
+            self._save_preferences()
+            if self.engine.is_running:
+                self._show_running_state()
+            elif enabled:
+                self.SetStatusText(
+                    f"Áudio espacial preparado em {settings.angle_degrees} graus."
+                )
+            else:
+                self.SetStatusText("Áudio espacial desativado.")
+        except (TypeError, ValueError):
+            pass
         event.Skip()
 
     def _on_toggle(self, _event: wx.Event) -> None:

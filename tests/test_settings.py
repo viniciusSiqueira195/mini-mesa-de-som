@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from mini_mesa.settings import ReverbSettings
+from mini_mesa.settings import ReverbSettings, SpatialSettings
 
 
 class ReverbSettingsTests(unittest.TestCase):
@@ -47,6 +47,19 @@ class ReverbSettingsTests(unittest.TestCase):
     def test_non_boolean_enabled_value_is_rejected(self) -> None:
         with self.assertRaises(TypeError):
             ReverbSettings(enabled=1)  # type: ignore[arg-type]
+
+
+class SpatialSettingsTests(unittest.TestCase):
+    def test_horizontal_position_accepts_the_full_circle(self) -> None:
+        self.assertEqual(SpatialSettings(True, -180).angle_degrees, -180)
+        self.assertEqual(SpatialSettings(True, 180).angle_degrees, 180)
+
+    def test_invalid_horizontal_position_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            SpatialSettings(True, 181)
+
+        with self.assertRaises(TypeError):
+            SpatialSettings(True, 45.5)  # type: ignore[arg-type]
 
 
 if __name__ == "__main__":

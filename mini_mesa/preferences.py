@@ -26,6 +26,8 @@ class AppPreferences:
     reverb_enabled: bool = True
     reverb_level: int = 25
     noise_reduction_enabled: bool = False
+    spatial_enabled: bool = False
+    spatial_angle: int = 0
 
     @classmethod
     def from_dict(cls, data: object) -> AppPreferences:
@@ -46,6 +48,14 @@ class AppPreferences:
         if isinstance(level, bool) or not isinstance(level, int) or not 0 <= level <= 100:
             level = defaults.reverb_level
 
+        spatial_angle = data.get("spatial_angle", defaults.spatial_angle)
+        if (
+            isinstance(spatial_angle, bool)
+            or not isinstance(spatial_angle, int)
+            or not -180 <= spatial_angle <= 180
+        ):
+            spatial_angle = defaults.spatial_angle
+
         return cls(
             input_device=text_value("input_device", defaults.input_device),
             output_device=text_value("output_device", defaults.output_device),
@@ -58,6 +68,8 @@ class AppPreferences:
             noise_reduction_enabled=bool_value(
                 "noise_reduction_enabled", defaults.noise_reduction_enabled
             ),
+            spatial_enabled=bool_value("spatial_enabled", defaults.spatial_enabled),
+            spatial_angle=spatial_angle,
         )
 
 
@@ -78,7 +90,7 @@ class PreferencesStore:
         try:
             with temporary_path.open("w", encoding="utf-8", newline="\n") as output:
                 json.dump(
-                    {"schema_version": 2, **asdict(preferences)},
+                    {"schema_version": 3, **asdict(preferences)},
                     output,
                     ensure_ascii=False,
                     indent=2,

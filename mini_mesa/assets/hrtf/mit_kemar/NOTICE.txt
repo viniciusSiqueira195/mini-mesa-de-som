@@ -1,0 +1,17 @@
+HRTF Measurements of a KEMAR Dummy-Head Microphone
+
+Authors: Bill Gardner and Keith Martin
+Institution: MIT Media Lab Machine Listening Group
+Original publication: 1994
+Source: https://sound.media.mit.edu/resources/KEMAR.html
+
+The included compact horizontal-plane HRIR files are derived from the official
+MIT KEMAR data archive. The archive states:
+
+"This data is Copyright 1994 by the MIT Media Laboratory. It is provided free
+with no restrictions on use, provided the authors are cited when the data is
+used in any research or commercial application."
+
+Files included here: H0e000a.wav, H0e045a.wav, H0e090a.wav, H0e135a.wav and
+H0e180a.wav. Negative angles are produced by exchanging the left and right ear
+responses, and intermediate angles are interpolated at runtime.

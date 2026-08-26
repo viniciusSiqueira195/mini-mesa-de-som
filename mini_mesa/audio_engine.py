@@ -8,7 +8,8 @@ from itertools import product
 from typing import Protocol
 
 from .noise_reduction import RNNOISE_SAMPLE_RATE, RNNoiseReducer
-from .settings import ReverbSettings
+from .settings import ReverbSettings, SpatialSettings
+from .spatial_audio import HRTFSpatializer
 
 
 _HOST_API_RANKS = {
@@ -63,6 +64,8 @@ class AudioBackend(Protocol):
 
     def update_noise_reduction(self, enabled: bool) -> None: ...
 
+    def update_spatial(self, settings: SpatialSettings) -> None: ...
+
 
 class PedalboardBackend:
     """PortAudio routing with native DSP powered by Spotify's Pedalboard."""
@@ -85,6 +88,9 @@ class PedalboardBackend:
         self._Reverb = Reverb
         self._reverb = None
         self._effects = None
+        self._limiter = None
+        self._spatializer: HRTFSpatializer | None = None
+        self._spatial_settings = SpatialSettings()
         self._active_stream: _MultiOutputSoundDeviceStream | None = None
         self._noise_reduction_enabled = False
         self._noise_reducer: RNNoiseReducer | None = None
@@ -195,11 +201,9 @@ class PedalboardBackend:
             dry_level=settings.dry_level,
             width=1.0,
         )
-        self._effects = self._Pedalboard(
-            [
-                reverb,
-                self._Limiter(threshold_db=-1.0, release_ms=100.0),
-            ]
+        self._effects = self._Pedalboard([reverb])
+        self._limiter = self._Pedalboard(
+            [self._Limiter(threshold_db=-1.0, release_ms=100.0)]
         )
         last_error: Exception | None = None
         combinations = product(input_candidates, output_candidates, monitor_candidates)
@@ -255,6 +259,8 @@ class PedalboardBackend:
                     self._reverb = reverb
                     with self._processing_lock:
                         self._replace_noise_reducer()
+                        self._spatializer = HRTFSpatializer(sample_rate)
+                        self._spatializer.update(self._spatial_settings)
                     self._active_stream = stream
                     return stream
             except Exception as exc:
@@ -262,6 +268,7 @@ class PedalboardBackend:
                 continue
 
         self._effects = None
+        self._limiter = None
         details = f" Detalhes técnicos: {last_error}" if last_error else ""
         raise RuntimeError(
             f"Não foi possível abrir o microfone '{input_device}' com a saída "
@@ -314,7 +321,7 @@ class PedalboardBackend:
         )
 
     def _process_audio(self, indata, frames: int):
-        output = self._np.zeros(frames, dtype=self._np.float32)
+        output = self._np.zeros((frames, 2), dtype=self._np.float32)
         with self._processing_lock:
             if self._effects is None:
                 return output
@@ -322,18 +329,30 @@ class PedalboardBackend:
             mono_input = self._np.mean(indata, axis=1, dtype=self._np.float32)
             if self._noise_reducer is not None:
                 mono_input = self._noise_reducer.process(mono_input)
-            processed = self._effects.process(
+            reverberated = self._effects.process(
                 mono_input[self._np.newaxis, :],
                 self._sample_rate,
                 buffer_size=frames,
                 reset=False,
             )
-        if processed.ndim == 1:
-            mono = processed
-        else:
-            mono = processed[0]
-        available = min(frames, mono.shape[0])
-        output[:available] = mono[:available]
+            mono = reverberated if reverberated.ndim == 1 else reverberated[0]
+            spatializer = self._spatializer
+            if spatializer is None:
+                stereo = self._np.column_stack((mono, mono))
+            else:
+                stereo = spatializer.process(mono)
+            if self._limiter is not None:
+                limited = self._limiter.process(
+                    stereo.T,
+                    self._sample_rate,
+                    buffer_size=frames,
+                    reset=False,
+                )
+                stereo = limited.T if limited.ndim == 2 else self._np.column_stack(
+                    (limited, limited)
+                )
+        available = min(frames, stereo.shape[0])
+        output[:available, :] = stereo[:available, :2]
         return output
 
     def update_reverb(self, settings: ReverbSettings) -> None:
@@ -349,6 +368,12 @@ class PedalboardBackend:
         if not isinstance(enabled, bool):
             raise TypeError("Estado da redução de ruído deve ser verdadeiro ou falso.")
         self._noise_reduction_enabled = enabled
+
+    def update_spatial(self, settings: SpatialSettings) -> None:
+        with self._processing_lock:
+            self._spatial_settings = settings
+            if self._spatializer is not None:
+                self._spatializer.update(settings)
 
     def _replace_noise_reducer(self) -> None:
         previous = self._noise_reducer
@@ -419,13 +444,14 @@ class _BufferedAudioOutput:
     ) -> None:
         self._sd = sounddevice
         self._block_size = block_size
+        self._output_channels = output_channels
         self._chunks = deque()
         self._head_offset = 0
         self._queued_frames = 0
         self._max_queued_frames = self._block_size * 4
         self._queue_lock = threading.Lock()
         self._prefilled = threading.Event()
-        self._last_sample = 0.0
+        self._last_sample = self._np_zeros(output_channels)
         self._underrun = True
         self._needs_crossfade = False
         self._underrun_count = 0
@@ -458,7 +484,7 @@ class _BufferedAudioOutput:
             self._chunks.clear()
             self._head_offset = 0
             self._queued_frames = 0
-            self._last_sample = 0.0
+            self._last_sample = self._np_zeros(self._output_channels)
             self._underrun = True
             self._needs_crossfade = False
             self._prefilled.clear()
@@ -476,21 +502,27 @@ class _BufferedAudioOutput:
                 chunk = self._chunks[0]
                 available = chunk.shape[0] - self._head_offset
                 count = min(frames - written, available)
-                mono = chunk[self._head_offset : self._head_offset + count]
-                outdata[written : written + count, :] = mono[:, None]
+                samples = chunk[self._head_offset : self._head_offset + count]
+                adapted = self._adapt_channels(samples)
+                outdata[written : written + count, :] = adapted
                 if self._underrun or self._needs_crossfade:
-                    fade_from = 0.0 if self._underrun else self._last_sample
+                    fade_from = (
+                        self._np_zeros(self._output_channels)
+                        if self._underrun
+                        else self._last_sample
+                    )
                     fade_frames = min(32, count)
                     for index in range(fade_frames):
                         amount = (index + 1) / fade_frames
-                        sample = fade_from * (1.0 - amount) + float(mono[index]) * amount
-                        outdata[written + index, :] = sample
+                        outdata[written + index, :] = (
+                            fade_from * (1.0 - amount) + adapted[index] * amount
+                        )
                     self._underrun = False
                     self._needs_crossfade = False
                 written += count
                 self._head_offset += count
                 self._queued_frames -= count
-                self._last_sample = float(mono[-1])
+                self._last_sample = adapted[-1].copy()
                 if self._head_offset == chunk.shape[0]:
                     self._chunks.popleft()
                     self._head_offset = 0
@@ -501,10 +533,30 @@ class _BufferedAudioOutput:
                 for index in range(fade_frames):
                     amount = (index + 1) / fade_frames
                     outdata[written + index, :] = self._last_sample * (1.0 - amount)
-                self._last_sample = 0.0
+                self._last_sample = self._np_zeros(self._output_channels)
                 if not self._underrun:
                     self._underrun_count += 1
                 self._underrun = True
+
+    @staticmethod
+    def _np_zeros(channels: int):
+        import numpy as np
+
+        return np.zeros(channels, dtype=np.float32)
+
+    def _adapt_channels(self, samples):
+        import numpy as np
+
+        samples = np.asarray(samples, dtype=np.float32)
+        if samples.ndim == 1:
+            return np.repeat(samples[:, None], self._output_channels, axis=1)
+        if samples.shape[1] == self._output_channels:
+            return samples
+        if self._output_channels == 1:
+            return np.mean(samples, axis=1, keepdims=True, dtype=np.float32)
+        if samples.shape[1] == 1:
+            return np.repeat(samples, self._output_channels, axis=1)
+        return samples[:, : self._output_channels]
 
 
 class _MultiOutputSoundDeviceStream:
@@ -719,6 +771,7 @@ class AudioEngine:
         self._output_device: str | None = None
         self._monitor_output: str | None = None
         self._noise_reduction_enabled = False
+        self._spatial_settings = SpatialSettings()
         self._stopping = False
         self._lock = threading.RLock()
 
@@ -829,6 +882,11 @@ class AudioEngine:
                 )
             self._backend.update_noise_reduction(enabled)
             self._noise_reduction_enabled = enabled
+
+    def update_spatial(self, settings: SpatialSettings) -> None:
+        with self._lock:
+            self._spatial_settings = settings
+            self._backend.update_spatial(settings)
 
     def stop(self, *, timeout: float = 2.0) -> None:
         with self._lock:

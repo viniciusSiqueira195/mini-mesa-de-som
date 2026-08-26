@@ -22,3 +22,6 @@ mini-mesa = "mini_mesa.__main__:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["mini_mesa*"]
+
+[tool.setuptools.package-data]
+mini_mesa = ["assets/hrtf/mit_kemar/*.wav", "assets/hrtf/mit_kemar/NOTICE.txt"]

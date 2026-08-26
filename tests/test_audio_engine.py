@@ -12,7 +12,7 @@ from mini_mesa.audio_engine import (
     _MultiOutputSoundDeviceStream,
     _normalize_device_label,
 )
-from mini_mesa.settings import ReverbSettings
+from mini_mesa.settings import ReverbSettings, SpatialSettings
 
 
 class FakeStream:
@@ -38,6 +38,7 @@ class FakeBackend:
         self.updated_with: ReverbSettings | None = None
         self.updated_monitors: list[str | None] = []
         self.noise_reduction_enabled = False
+        self.spatial_settings = SpatialSettings()
 
     def input_devices(self) -> tuple[str, ...]:
         return ("FIFINE AM8", "Zeus X")
@@ -66,6 +67,9 @@ class FakeBackend:
 
     def update_noise_reduction(self, enabled: bool) -> None:
         self.noise_reduction_enabled = enabled
+
+    def update_spatial(self, settings: SpatialSettings) -> None:
+        self.spatial_settings = settings
 
 
 class FakeOutputStream:
@@ -153,6 +157,43 @@ class BufferedAudioOutputTests(unittest.TestCase):
         np.testing.assert_array_equal(destination[:, 0], destination[:, 1])
         self.assertEqual(output._underrun_count, 1)
 
+    def test_stereo_processed_audio_keeps_its_binaural_channels(self) -> None:
+        output = _BufferedAudioOutput(
+            sounddevice=FakeSoundDevice(),
+            output_id=7,
+            sample_rate=48_000,
+            output_channels=2,
+            block_size=2,
+        )
+        output._underrun = False
+        output.push(
+            np.array([[0.25, -0.25], [0.5, -0.5]], dtype=np.float32)
+        )
+        destination = np.zeros((2, 2), dtype=np.float32)
+
+        output._on_output(destination, 2, None, None)
+
+        np.testing.assert_array_equal(
+            destination,
+            np.array([[0.25, -0.25], [0.5, -0.5]], dtype=np.float32),
+        )
+
+    def test_stereo_is_safely_downmixed_for_a_mono_output(self) -> None:
+        output = _BufferedAudioOutput(
+            sounddevice=FakeSoundDevice(),
+            output_id=7,
+            sample_rate=48_000,
+            output_channels=1,
+            block_size=2,
+        )
+        output._underrun = False
+        output.push(np.array([[0.8, 0.2], [-0.4, 0.2]], dtype=np.float32))
+        destination = np.zeros((2, 1), dtype=np.float32)
+
+        output._on_output(destination, 2, None, None)
+
+        np.testing.assert_allclose(destination[:, 0], np.array([0.5, -0.1]))
+
 
 class MultiOutputStreamTests(unittest.TestCase):
     def test_removing_monitor_closes_only_the_monitor_output(self) -> None:
@@ -202,6 +243,8 @@ class PedalboardProcessingTests(unittest.TestCase):
         backend._np = np
         backend._effects = effects
         backend._noise_reducer = FakeNoiseReducer()
+        backend._spatializer = None
+        backend._limiter = None
         backend._sample_rate = 48_000.0
         backend._processing_lock = threading.Lock()
         microphone = np.full((4, 1), 0.8, dtype=np.float32)
@@ -209,7 +252,7 @@ class PedalboardProcessingTests(unittest.TestCase):
         output = backend._process_audio(microphone, 4)
 
         np.testing.assert_allclose(effects.received, np.full((1, 4), 0.4))
-        np.testing.assert_allclose(output, np.full(4, 0.4))
+        np.testing.assert_allclose(output, np.full((4, 2), 0.4))
 
 
 class AudioEngineTests(unittest.TestCase):
@@ -301,6 +344,19 @@ class AudioEngineTests(unittest.TestCase):
             engine.update_noise_reduction(True)
 
         self.assertFalse(backend.noise_reduction_enabled)
+        self.assertTrue(engine.is_running)
+        engine.stop()
+
+    def test_spatial_position_can_change_while_audio_is_running(self) -> None:
+        backend = FakeBackend()
+        engine = AudioEngine(backend)
+        engine.start("Zeus X", "CABLE Input")
+        self.assertTrue(backend.stream.started.wait(timeout=1))
+
+        settings = SpatialSettings(enabled=True, angle_degrees=-90)
+        engine.update_spatial(settings)
+
+        self.assertEqual(backend.spatial_settings, settings)
         self.assertTrue(engine.is_running)
         engine.stop()
 

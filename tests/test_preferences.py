@@ -21,13 +21,15 @@ class PreferencesStoreTests(unittest.TestCase):
                 reverb_enabled=False,
                 reverb_level=72,
                 noise_reduction_enabled=True,
+                spatial_enabled=True,
+                spatial_angle=-90,
             )
 
             store.save(expected)
 
             self.assertEqual(store.load(), expected)
             saved = json.loads(path.read_text(encoding="utf-8"))
-            self.assertEqual(saved["schema_version"], 2)
+            self.assertEqual(saved["schema_version"], 3)
             self.assertEqual(saved["input_device"], "Microfone Áudio")
 
     def test_invalid_file_falls_back_to_defaults(self) -> None:
@@ -45,6 +47,8 @@ class PreferencesStoreTests(unittest.TestCase):
                 "reverb_enabled": False,
                 "reverb_level": 500,
                 "noise_reduction_enabled": True,
+                "spatial_enabled": True,
+                "spatial_angle": 900,
             }
         )
 
@@ -53,6 +57,8 @@ class PreferencesStoreTests(unittest.TestCase):
         self.assertFalse(preferences.reverb_enabled)
         self.assertEqual(preferences.reverb_level, 25)
         self.assertTrue(preferences.noise_reduction_enabled)
+        self.assertTrue(preferences.spatial_enabled)
+        self.assertEqual(preferences.spatial_angle, 0)
 
 
 if __name__ == "__main__":

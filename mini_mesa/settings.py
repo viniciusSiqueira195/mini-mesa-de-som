@@ -49,3 +49,21 @@ class ReverbSettings:
     @property
     def damping(self) -> float:
         return 0.55 - (0.20 * self.normalized_level)
+
+
+@dataclass(frozen=True, slots=True)
+class SpatialSettings:
+    """User-facing horizontal position for binaural HRTF processing."""
+
+    enabled: bool = False
+    angle_degrees: int = 0
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.enabled, bool):
+            raise TypeError("Estado do áudio espacial deve ser verdadeiro ou falso")
+        if isinstance(self.angle_degrees, bool) or not isinstance(
+            self.angle_degrees, int
+        ):
+            raise TypeError("Posição espacial deve ser um número inteiro")
+        if not -180 <= self.angle_degrees <= 180:
+            raise ValueError("Posição espacial deve estar entre -180 e 180 graus")
