@@ -1,11 +1,28 @@
 from __future__ import annotations
 
+import re
 import threading
 from collections import deque
 from collections.abc import Callable, Sequence
 from typing import Protocol
 
 from .settings import ReverbSettings
+
+
+_HOST_API_RANKS = {
+    "Windows WDM-KS": 0,
+    "Windows WASAPI": 1,
+    "Windows DirectSound": 2,
+    "MME": 3,
+}
+_DEVICE_INSTANCE_PREFIX = re.compile(r"\((?:\d+\s*-\s*)")
+
+
+def _normalize_device_label(label: str) -> str:
+    """Collapse Windows instance prefixes such as ``(5- USB Audio Device)``."""
+
+    compact = " ".join(label.split())
+    return _DEVICE_INSTANCE_PREFIX.sub("(", compact)
 
 
 class AudioDependencyError(RuntimeError):
@@ -55,8 +72,8 @@ class PedalboardBackend:
         self._reverb = None
         self._effects = None
         self._sample_rate = 48_000.0
-        self._input_ids: dict[str, tuple[int, str]] = {}
-        self._output_ids: dict[str, tuple[int, str]] = {}
+        self._input_ids: dict[str, list[tuple[int, str]]] = {}
+        self._output_ids: dict[str, list[tuple[int, str]]] = {}
 
     def input_devices(self) -> Sequence[str]:
         self._refresh_devices()
@@ -69,37 +86,36 @@ class PedalboardBackend:
     def _refresh_devices(self) -> None:
         devices = self._sd.query_devices()
         host_apis = self._sd.query_hostapis()
-        input_ids: dict[str, tuple[int, str]] = {}
-        output_ids: dict[str, tuple[int, str]] = {}
-        ranks = {
-            "Windows WDM-KS": 0,
-            "Windows WASAPI": 1,
-            "Windows DirectSound": 2,
-            "MME": 3,
-        }
+        input_ids: dict[str, list[tuple[int, str]]] = {}
+        output_ids: dict[str, list[tuple[int, str]]] = {}
 
         for device_id, device in enumerate(devices):
             host_name = host_apis[device["hostapi"]]["name"]
-            label = device["name"]
+            label = _normalize_device_label(device["name"])
             if device["max_input_channels"] > 0:
-                current = input_ids.get(label)
-                if current is None or ranks.get(host_name, 99) < ranks.get(current[1], 99):
-                    input_ids[label] = (device_id, host_name)
+                input_ids.setdefault(label, []).append((device_id, host_name))
             if device["max_output_channels"] > 0:
-                current = output_ids.get(label)
-                if current is None or ranks.get(host_name, 99) < ranks.get(current[1], 99):
-                    output_ids[label] = (device_id, host_name)
+                output_ids.setdefault(label, []).append((device_id, host_name))
+
+        for candidates in (*input_ids.values(), *output_ids.values()):
+            candidates.sort(key=lambda candidate: _HOST_API_RANKS.get(candidate[1], 99))
 
         self._input_ids = dict(
             sorted(
                 input_ids.items(),
-                key=lambda item: (ranks.get(item[1][1], 99), item[0].casefold()),
+                key=lambda item: (
+                    _HOST_API_RANKS.get(item[1][0][1], 99),
+                    item[0].casefold(),
+                ),
             )
         )
         self._output_ids = dict(
             sorted(
                 output_ids.items(),
-                key=lambda item: (ranks.get(item[1][1], 99), item[0].casefold()),
+                key=lambda item: (
+                    _HOST_API_RANKS.get(item[1][0][1], 99),
+                    item[0].casefold(),
+                ),
             )
         )
 
@@ -112,25 +128,13 @@ class PedalboardBackend:
         if input_device not in self._input_ids or output_device not in self._output_ids:
             self._refresh_devices()
         try:
-            input_id, _input_api = self._input_ids[input_device]
-            output_id, _output_api = self._output_ids[output_device]
+            input_candidates = self._input_ids[input_device]
+            output_candidates = self._output_ids[output_device]
         except KeyError as exc:
             raise ValueError(
                 "O dispositivo selecionado não está mais disponível. "
                 "Atualize a lista de dispositivos."
             ) from exc
-        input_info = self._sd.query_devices(input_id)
-        output_info = self._sd.query_devices(output_id)
-        input_channels = min(2, int(input_info["max_input_channels"]))
-        output_channels = min(2, int(output_info["max_output_channels"]))
-        self._sample_rate = self._find_common_sample_rate(
-            input_id,
-            output_id,
-            input_channels,
-            output_channels,
-            float(input_info["default_samplerate"]),
-            float(output_info["default_samplerate"]),
-        )
 
         reverb = self._Reverb(
             room_size=settings.room_size,
@@ -145,18 +149,47 @@ class PedalboardBackend:
                 self._Limiter(threshold_db=-1.0, release_ms=100.0),
             ]
         )
-        stream = _SplitSoundDeviceStream(
-            sounddevice=self._sd,
-            numpy=self._np,
-            input_id=input_id,
-            output_id=output_id,
-            sample_rate=self._sample_rate,
-            input_channels=input_channels,
-            output_channels=output_channels,
-            processor=self._process_audio,
+        last_error: Exception | None = None
+        for input_id, _input_api in input_candidates:
+            for output_id, _output_api in output_candidates:
+                try:
+                    input_info = self._sd.query_devices(input_id)
+                    output_info = self._sd.query_devices(output_id)
+                    input_channels = min(2, int(input_info["max_input_channels"]))
+                    output_channels = min(2, int(output_info["max_output_channels"]))
+                    sample_rate = self._find_common_sample_rate(
+                        input_id,
+                        output_id,
+                        input_channels,
+                        output_channels,
+                        float(input_info["default_samplerate"]),
+                        float(output_info["default_samplerate"]),
+                    )
+                    stream = _SplitSoundDeviceStream(
+                        sounddevice=self._sd,
+                        numpy=self._np,
+                        input_id=input_id,
+                        output_id=output_id,
+                        sample_rate=sample_rate,
+                        input_channels=input_channels,
+                        output_channels=output_channels,
+                        processor=self._process_audio,
+                    )
+                except Exception as exc:
+                    last_error = exc
+                    continue
+
+                self._sample_rate = sample_rate
+                self._reverb = reverb
+                return stream
+
+        self._effects = None
+        details = f" Detalhes técnicos: {last_error}" if last_error else ""
+        raise RuntimeError(
+            f"Não foi possível abrir o microfone '{input_device}' com a saída "
+            f"'{output_device}'. Atualize os dispositivos ou escolha outra entrada."
+            f"{details}"
         )
-        self._reverb = reverb
-        return stream
 
     def _find_common_sample_rate(
         self,

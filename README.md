@@ -28,6 +28,15 @@ duração da cauda. Não é necessário configurar parâmetros técnicos separad
 Evite selecionar caixas de som como saída enquanto elas estiverem próximas do
 microfone: isso pode produzir microfonia.
 
+### Quando um microfone aparece, mas não abre
+
+O Windows pode anunciar o mesmo microfone por várias APIs, mesmo quando algumas
+delas não funcionam com o driver instalado. A Mini Mesa agrupa nomes duplicados
+e tenta automaticamente WDM-KS, WASAPI, DirectSound e MME. Se todas forem
+recusadas, feche outros programas que possam estar usando o microfone em modo
+exclusivo, reconecte o dispositivo e pressione `F5`. O FIFINE AM8 e o Virtual
+Audio Cable usados no desenvolvimento foram validados em transmissão real.
+
 ## Instalação para desenvolvimento
 
 No PowerShell, dentro desta pasta:

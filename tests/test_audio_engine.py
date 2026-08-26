@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 import unittest
 
-from mini_mesa.audio_engine import AudioEngine
+from mini_mesa.audio_engine import AudioEngine, _normalize_device_label
 from mini_mesa.settings import ReverbSettings
 
 
@@ -49,6 +49,12 @@ class FakeBackend:
 
 
 class AudioEngineTests(unittest.TestCase):
+    def test_windows_instance_prefixes_do_not_duplicate_the_same_microphone(self) -> None:
+        self.assertEqual(
+            _normalize_device_label("Microfone (5- USB Audio Device)"),
+            "Microfone (USB Audio Device)",
+        )
+
     def test_devices_are_not_tied_to_a_microphone_brand(self) -> None:
         engine = AudioEngine(FakeBackend())
 
