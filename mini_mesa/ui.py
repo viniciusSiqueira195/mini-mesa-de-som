@@ -256,7 +256,7 @@ class MainFrame(wx.Frame):
         previous_monitor = self._saved_monitor_output()
         self._save_preferences()
         if event.GetEventObject() is self.monitor_choice and self.engine.is_running:
-            self._restart_running_route(previous_monitor)
+            self._update_running_monitor(previous_monitor)
         event.Skip()
 
     def _on_monitor_toggled(self, _event: wx.Event) -> None:
@@ -265,7 +265,7 @@ class MainFrame(wx.Frame):
         self.monitor_choice.Enable(enabled)
         self._save_preferences()
         if self.engine.is_running:
-            self._restart_running_route(previous_monitor)
+            self._update_running_monitor(previous_monitor)
             return
         self.SetStatusText(
             "Retorno ativado; escolha onde deseja ouvir sua voz."
@@ -316,27 +316,11 @@ class MainFrame(wx.Frame):
             else "Mesa ativa sem reverb."
         )
 
-    def _restart_running_route(self, previous_monitor: str | None) -> None:
+    def _update_running_monitor(self, previous_monitor: str | None) -> None:
         self.SetStatusText("Atualizando a rota de retorno...")
-        self.engine.stop()
         try:
-            self._start_selected_route()
+            self.engine.update_monitor(self._selected_monitor_output())
         except Exception as exc:
-            try:
-                self._start_route(previous_monitor)
-            except Exception:
-                self._set_routing_controls_enabled(True)
-                self.toggle_button.SetLabel("&Ativar mesa")
-                self.status.ChangeValue(
-                    "Mesa desativada após falha ao alterar o retorno."
-                )
-                self._show_error(
-                    "Não foi possível alterar o retorno nem restaurar a rota "
-                    "anterior; a mesa foi desativada.\n\n"
-                    f"{exc}"
-                )
-                return
-
             self.monitor_checkbox.SetValue(previous_monitor is not None)
             if previous_monitor is not None:
                 self.monitor_choice.SetStringSelection(previous_monitor)
@@ -345,8 +329,8 @@ class MainFrame(wx.Frame):
             self._set_routing_controls_enabled(False)
             self._show_running_state()
             self._show_error(
-                "Não foi possível alterar o retorno. A rota anterior foi "
-                f"restaurada.\n\n{exc}"
+                "Não foi possível alterar o retorno. A mesa e a rota anterior "
+                f"continuam funcionando.\n\n{exc}"
             )
             return
 

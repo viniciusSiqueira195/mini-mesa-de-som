@@ -53,8 +53,8 @@ WhatsApp ao mesmo tempo. Use preferencialmente fones; retornar o microfone para
 caixas de som pode provocar microfonia.
 
 Os controles de retorno permanecem disponíveis enquanto a mesa está ativa.
-Marcar, desmarcar ou escolher outro dispositivo reconfigura automaticamente o
-fluxo de áudio, com uma breve interrupção enquanto os dispositivos são reabertos.
+Marcar, desmarcar ou escolher outro dispositivo altera somente a saída de
+retorno. O microfone, a saída virtual e os efeitos continuam funcionando.
 
 O retorno usa preferencialmente WASAPI compartilhado. Saídas exclusivas WDM-KS
 não são oferecidas para monitoramento, pois muitos drivers não permitem que elas

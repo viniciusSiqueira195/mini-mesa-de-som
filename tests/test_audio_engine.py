@@ -8,6 +8,7 @@ import numpy as np
 from mini_mesa.audio_engine import (
     AudioEngine,
     _BufferedAudioOutput,
+    _MultiOutputSoundDeviceStream,
     _normalize_device_label,
 )
 from mini_mesa.settings import ReverbSettings
@@ -34,6 +35,7 @@ class FakeBackend:
         self.stream = stream or FakeStream()
         self.created_with: tuple[str, str, ReverbSettings, str | None] | None = None
         self.updated_with: ReverbSettings | None = None
+        self.updated_monitors: list[str | None] = []
 
     def input_devices(self) -> tuple[str, ...]:
         return ("FIFINE AM8", "Zeus X")
@@ -57,9 +59,24 @@ class FakeBackend:
     def update_reverb(self, settings: ReverbSettings) -> None:
         self.updated_with = settings
 
+    def update_monitor(self, monitor_output: str | None) -> None:
+        self.updated_monitors.append(monitor_output)
+
 
 class FakeOutputStream:
-    closed = False
+    def __init__(self) -> None:
+        self.active = False
+        self.closed = False
+
+    def start(self) -> None:
+        self.active = True
+
+    def abort(self) -> None:
+        self.active = False
+
+    def close(self) -> None:
+        self.active = False
+        self.closed = True
 
 
 class FakeSoundDevice:
@@ -132,6 +149,35 @@ class BufferedAudioOutputTests(unittest.TestCase):
         self.assertEqual(output._underrun_count, 1)
 
 
+class MultiOutputStreamTests(unittest.TestCase):
+    def test_removing_monitor_closes_only_the_monitor_output(self) -> None:
+        primary = _BufferedAudioOutput(
+            sounddevice=FakeSoundDevice(),
+            output_id=1,
+            sample_rate=48_000,
+            output_channels=2,
+            block_size=4,
+        )
+        monitor = _BufferedAudioOutput(
+            sounddevice=FakeSoundDevice(),
+            output_id=2,
+            sample_rate=48_000,
+            output_channels=2,
+            block_size=4,
+        )
+        stream = object.__new__(_MultiOutputSoundDeviceStream)
+        stream._outputs_lock = threading.Lock()
+        stream._outputs = [primary, monitor]
+        stream._monitor_output = monitor
+
+        stream.replace_monitor(None, 0)
+
+        self.assertEqual(stream._outputs, [primary])
+        self.assertIsNone(stream._monitor_output)
+        self.assertFalse(primary.stream.closed)
+        self.assertTrue(monitor.stream.closed)
+
+
 class AudioEngineTests(unittest.TestCase):
     def test_windows_instance_prefixes_do_not_duplicate_the_same_microphone(self) -> None:
         self.assertEqual(
@@ -175,6 +221,32 @@ class AudioEngineTests(unittest.TestCase):
             backend.created_with,
             ("Zeus X", "CABLE Input", ReverbSettings(), "Alto-falantes"),
         )
+        engine.stop()
+
+    def test_monitor_can_be_removed_without_stopping_the_audio_stream(self) -> None:
+        backend = FakeBackend()
+        engine = AudioEngine(backend)
+        engine.start("Zeus X", "CABLE Input", "Alto-falantes")
+        self.assertTrue(backend.stream.started.wait(timeout=1))
+
+        engine.update_monitor(None)
+
+        self.assertEqual(backend.updated_monitors, [None])
+        self.assertTrue(engine.is_running)
+        self.assertFalse(backend.stream.closed.is_set())
+        engine.stop()
+
+    def test_monitor_can_be_added_without_recreating_the_audio_stream(self) -> None:
+        backend = FakeBackend()
+        engine = AudioEngine(backend)
+        engine.start("Zeus X", "CABLE Input")
+        self.assertTrue(backend.stream.started.wait(timeout=1))
+
+        engine.update_monitor("Alto-falantes")
+
+        self.assertEqual(backend.updated_monitors, ["Alto-falantes"])
+        self.assertTrue(engine.is_running)
+        self.assertFalse(backend.stream.closed.is_set())
         engine.stop()
 
     def test_monitor_and_virtual_output_must_be_different(self) -> None:

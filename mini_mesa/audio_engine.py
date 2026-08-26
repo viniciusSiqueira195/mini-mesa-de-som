@@ -58,6 +58,8 @@ class AudioBackend(Protocol):
 
     def update_reverb(self, settings: ReverbSettings) -> None: ...
 
+    def update_monitor(self, monitor_output: str | None) -> None: ...
+
 
 class PedalboardBackend:
     """PortAudio routing with native DSP powered by Spotify's Pedalboard."""
@@ -80,6 +82,7 @@ class PedalboardBackend:
         self._Reverb = Reverb
         self._reverb = None
         self._effects = None
+        self._active_stream: _MultiOutputSoundDeviceStream | None = None
         self._sample_rate = 48_000.0
         self._input_ids: dict[str, list[tuple[int, str]]] = {}
         self._output_ids: dict[str, list[tuple[int, str]]] = {}
@@ -244,6 +247,7 @@ class PedalboardBackend:
 
                     self._sample_rate = sample_rate
                     self._reverb = reverb
+                    self._active_stream = stream
                     return stream
             except Exception as exc:
                 last_error = exc
@@ -325,6 +329,52 @@ class PedalboardBackend:
         self._reverb.wet_level = settings.wet_level
         self._reverb.dry_level = settings.dry_level
 
+    def update_monitor(self, monitor_output: str | None) -> None:
+        stream = self._active_stream
+        if stream is None:
+            raise RuntimeError("A mesa não está ativa.")
+        if monitor_output is None:
+            stream.replace_monitor(None, 0)
+            return
+
+        if monitor_output not in self._output_ids:
+            self._refresh_devices()
+        try:
+            candidates = sorted(
+                (
+                    candidate
+                    for candidate in self._output_ids[monitor_output]
+                    if candidate[1] in _MONITOR_API_RANKS
+                ),
+                key=lambda candidate: _MONITOR_API_RANKS[candidate[1]],
+            )
+        except KeyError as exc:
+            raise ValueError(
+                "O dispositivo de retorno não está mais disponível. "
+                "Atualize a lista de dispositivos."
+            ) from exc
+
+        last_error: Exception | None = None
+        for output_id, _api_name in candidates:
+            try:
+                device_info = self._sd.query_devices(output_id)
+                channels = min(2, int(device_info["max_output_channels"]))
+                self._sd.check_output_settings(
+                    device=output_id,
+                    channels=channels,
+                    dtype="float32",
+                    samplerate=self._sample_rate,
+                )
+                stream.replace_monitor(output_id, channels)
+                return
+            except Exception as exc:
+                last_error = exc
+
+        details = f" Detalhes técnicos: {last_error}" if last_error else ""
+        raise RuntimeError(
+            f"Não foi possível abrir o retorno '{monitor_output}'.{details}"
+        )
+
 
 class _BufferedAudioOutput:
     """Feed one output device while keeping queued latency strictly bounded."""
@@ -345,6 +395,7 @@ class _BufferedAudioOutput:
         self._queued_frames = 0
         self._max_queued_frames = self._block_size * 4
         self._queue_lock = threading.Lock()
+        self._prefilled = threading.Event()
         self._last_sample = 0.0
         self._underrun = True
         self._needs_crossfade = False
@@ -370,6 +421,8 @@ class _BufferedAudioOutput:
                 self._head_offset = 0
                 self._needs_crossfade = True
                 self._dropped_block_count += 1
+            if self._queued_frames >= self._block_size * 2:
+                self._prefilled.set()
 
     def clear(self) -> None:
         with self._queue_lock:
@@ -379,6 +432,10 @@ class _BufferedAudioOutput:
             self._last_sample = 0.0
             self._underrun = True
             self._needs_crossfade = False
+            self._prefilled.clear()
+
+    def wait_until_prefilled(self, timeout: float) -> bool:
+        return self._prefilled.wait(timeout)
 
     def _on_output(self, outdata, frames, _time_info, _status) -> None:
         outdata.fill(0)
@@ -437,6 +494,8 @@ class _MultiOutputSoundDeviceStream:
     ) -> None:
         self._sd = sounddevice
         self._processor = processor
+        self._sample_rate = sample_rate
+        self._block_size = block_size
         self._stop_event = threading.Event()
         self._first_audio = threading.Event()
         self._captured_blocks = 0
@@ -444,6 +503,9 @@ class _MultiOutputSoundDeviceStream:
         self._error: Exception | None = None
         self._validating = False
         self._outputs: list[_BufferedAudioOutput] = []
+        self._outputs_lock = threading.Lock()
+        self._pending_monitor: _BufferedAudioOutput | None = None
+        self._monitor_output: _BufferedAudioOutput | None = None
         self._input = sounddevice.InputStream(
             device=input_id,
             samplerate=sample_rate,
@@ -464,6 +526,9 @@ class _MultiOutputSoundDeviceStream:
                         block_size=block_size,
                     )
                 )
+            self._primary_output = self._outputs[0]
+            if len(self._outputs) > 1:
+                self._monitor_output = self._outputs[1]
         except Exception:
             self._close_streams()
             raise
@@ -492,7 +557,7 @@ class _MultiOutputSoundDeviceStream:
                 output.stream.start()
             while (
                 self._input.active
-                and all(output.stream.active for output in self._outputs)
+                and self._primary_output.stream.active
                 and not self._stop_event.wait(0.1)
             ):
                 pass
@@ -515,14 +580,78 @@ class _MultiOutputSoundDeviceStream:
             self._stop_event.set()
             raise self._sd.CallbackAbort
 
-        for output in self._outputs:
+        with self._outputs_lock:
+            outputs = tuple(self._outputs)
+            pending_monitor = self._pending_monitor
+        if pending_monitor is not None:
+            outputs = (*outputs, pending_monitor)
+        for output in outputs:
             output.push(processed)
         self._captured_blocks += 1
         if self._captured_blocks >= self._prefill_blocks:
             self._first_audio.set()
 
+    def replace_monitor(self, output_id: int | None, output_channels: int) -> None:
+        if output_id is None:
+            with self._outputs_lock:
+                previous = self._monitor_output
+                self._monitor_output = None
+                if previous in self._outputs:
+                    self._outputs.remove(previous)
+            if previous is not None:
+                self._close_output(previous)
+            return
+
+        replacement = _BufferedAudioOutput(
+            sounddevice=self._sd,
+            output_id=output_id,
+            sample_rate=self._sample_rate,
+            output_channels=output_channels,
+            block_size=self._block_size,
+        )
+        with self._outputs_lock:
+            if self._pending_monitor is not None:
+                self._close_output(replacement)
+                raise RuntimeError("Outra alteração de retorno já está em andamento.")
+            self._pending_monitor = replacement
+
+        try:
+            if not replacement.wait_until_prefilled(0.2):
+                raise RuntimeError("O retorno não recebeu áudio a tempo de iniciar.")
+            replacement.stream.start()
+        except Exception:
+            with self._outputs_lock:
+                if self._pending_monitor is replacement:
+                    self._pending_monitor = None
+            self._close_output(replacement)
+            raise
+
+        with self._outputs_lock:
+            previous = self._monitor_output
+            self._monitor_output = replacement
+            self._outputs.append(replacement)
+            self._pending_monitor = None
+            if previous in self._outputs:
+                self._outputs.remove(previous)
+        if previous is not None:
+            self._close_output(previous)
+
+    @staticmethod
+    def _close_output(output: _BufferedAudioOutput) -> None:
+        try:
+            if not output.stream.closed:
+                output.stream.abort()
+                output.stream.close()
+        except Exception:
+            pass
+
     def _close_streams(self) -> None:
-        streams = [self._input, *(output.stream for output in self._outputs)]
+        with self._outputs_lock:
+            outputs = tuple(self._outputs)
+            pending_monitor = self._pending_monitor
+        if pending_monitor is not None:
+            outputs = (*outputs, pending_monitor)
+        streams = [self._input, *(output.stream for output in outputs)]
         for stream in streams:
             try:
                 if not stream.closed:
@@ -532,7 +661,9 @@ class _MultiOutputSoundDeviceStream:
                 pass
 
     def _abort_streams(self) -> None:
-        streams = [self._input, *(output.stream for output in self._outputs)]
+        with self._outputs_lock:
+            outputs = tuple(self._outputs)
+        streams = [self._input, *(output.stream for output in outputs)]
         for stream in streams:
             try:
                 if stream.active:
@@ -555,6 +686,9 @@ class AudioEngine:
         self._settings = ReverbSettings()
         self._stream: AudioStream | None = None
         self._thread: threading.Thread | None = None
+        self._input_device: str | None = None
+        self._output_device: str | None = None
+        self._monitor_output: str | None = None
         self._stopping = False
         self._lock = threading.RLock()
 
@@ -624,6 +758,9 @@ class AudioEngine:
                 monitor_output,
             )
             self._stream = stream
+            self._input_device = input_device
+            self._output_device = output_device
+            self._monitor_output = monitor_output
             self._stopping = False
             thread = threading.Thread(
                 target=self._run_stream,
@@ -633,6 +770,24 @@ class AudioEngine:
             )
             self._thread = thread
             thread.start()
+
+    def update_monitor(self, monitor_output: str | None) -> None:
+        monitor_output = monitor_output.strip() if monitor_output else None
+        with self._lock:
+            if self._stream is None:
+                raise RuntimeError("A mesa não está ativa.")
+            if monitor_output == self._output_device:
+                raise ValueError(
+                    "A saída de retorno deve ser diferente da saída virtual."
+                )
+            if monitor_output == self._input_device:
+                raise ValueError(
+                    "O retorno não pode usar o mesmo dispositivo de entrada."
+                )
+            if monitor_output == self._monitor_output:
+                return
+            self._backend.update_monitor(monitor_output)
+            self._monitor_output = monitor_output
 
     def stop(self, *, timeout: float = 2.0) -> None:
         with self._lock:
@@ -651,6 +806,12 @@ class AudioEngine:
                 if self._stream is stream:
                     self._stream = None
                     self._thread = None
+                    self._input_device = None
+                    self._output_device = None
+                    self._monitor_output = None
+                    self._input_device = None
+                    self._output_device = None
+                    self._monitor_output = None
                 self._stopping = False
 
     def _run_stream(self, stream: AudioStream) -> None:
