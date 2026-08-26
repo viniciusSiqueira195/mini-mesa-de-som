@@ -24,6 +24,9 @@ instalado. Com o VB-CABLE, por exemplo:
 O único ajuste do efeito é **Nível de reverb**, de 0 a 100. Internamente, esse
 controle equilibra a quantidade do efeito, o tamanho do ambiente simulado e a
 duração da cauda. Não é necessário configurar parâmetros técnicos separados.
+A voz limpa e o efeito são misturados proporcionalmente com margem automática
+de volume, evitando que a soma dos dois sinais sature ou acione o limitador o
+tempo inteiro.
 
 ## Retorno da própria voz
 

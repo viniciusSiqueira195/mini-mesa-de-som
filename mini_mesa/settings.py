@@ -3,6 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
+_MIX_HEADROOM = 0.90
+_MAX_WET_SHARE = 0.80
+
+
 def _validate_percent(name: str, value: int) -> None:
     if isinstance(value, bool) or not isinstance(value, int):
         raise TypeError(f"{name} deve ser um número inteiro")
@@ -25,7 +29,11 @@ class ReverbSettings:
 
     @property
     def wet_level(self) -> float:
-        return self.normalized_level
+        return _MIX_HEADROOM * _MAX_WET_SHARE * self.normalized_level
+
+    @property
+    def dry_level(self) -> float:
+        return _MIX_HEADROOM - self.wet_level
 
     @property
     def room_size(self) -> float:

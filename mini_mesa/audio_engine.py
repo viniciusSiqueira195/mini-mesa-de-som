@@ -183,7 +183,7 @@ class PedalboardBackend:
             room_size=settings.room_size,
             damping=settings.damping,
             wet_level=settings.wet_level,
-            dry_level=1.0,
+            dry_level=settings.dry_level,
             width=1.0,
         )
         self._effects = self._Pedalboard(
@@ -320,6 +320,7 @@ class PedalboardBackend:
         self._reverb.room_size = settings.room_size
         self._reverb.damping = settings.damping
         self._reverb.wet_level = settings.wet_level
+        self._reverb.dry_level = settings.dry_level
 
 
 class _BufferedAudioOutput:
