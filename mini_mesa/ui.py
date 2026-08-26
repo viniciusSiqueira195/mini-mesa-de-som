@@ -1,10 +1,57 @@
 from __future__ import annotations
 
 import wx
+import wx.adv
 
 from .audio_engine import AudioDependencyError, AudioEngine
 from .preferences import AppPreferences, PreferencesStore
 from .settings import ReverbSettings, SpatialSettings
+
+
+class SystemTrayIcon(wx.adv.TaskBarIcon):
+    """Keep the mixer reachable after Windows minimizes the main window."""
+
+    def __init__(self, frame: MainFrame) -> None:
+        super().__init__()
+        self._frame = frame
+        self._restore_id = wx.NewIdRef()
+        self._exit_id = wx.NewIdRef()
+        icon = wx.ArtProvider.GetIcon(wx.ART_EXECUTABLE_FILE, wx.ART_OTHER, (16, 16))
+        self._available = bool(self.SetIcon(icon, "Mini Mesa de Som"))
+        self.Bind(wx.adv.EVT_TASKBAR_LEFT_UP, self._on_restore)
+        self.Bind(wx.EVT_MENU, self._on_restore, id=self._restore_id)
+        self.Bind(wx.EVT_MENU, self._on_exit, id=self._exit_id)
+
+    def CreatePopupMenu(self) -> wx.Menu:
+        menu = wx.Menu()
+        menu.Append(self._restore_id, "&Abrir Mini Mesa de Som")
+        menu.AppendSeparator()
+        menu.Append(self._exit_id, "En&cerrar programa")
+        return menu
+
+    @property
+    def is_available(self) -> bool:
+        return self._available and self.IsIconInstalled()
+
+    def notify_minimized(self, running: bool) -> None:
+        if not self.is_available:
+            return
+        state = "A mesa continua ativa." if running else "O programa continua aberto."
+        try:
+            self.ShowBalloon(
+                "Mini Mesa de Som",
+                f"Janela minimizada para a bandeja. {state}",
+                3000,
+                wx.ICON_INFORMATION,
+            )
+        except (AttributeError, wx.wxAssertionError):
+            pass
+
+    def _on_restore(self, _event: wx.Event) -> None:
+        self._frame.restore_from_tray()
+
+    def _on_exit(self, _event: wx.Event) -> None:
+        self._frame.exit_from_tray()
 
 
 class MainFrame(wx.Frame):
@@ -18,6 +65,9 @@ class MainFrame(wx.Frame):
         self.engine.set_error_handler(self._on_audio_error)
         self.preferences_store = preferences_store or PreferencesStore()
         self.preferences = self.preferences_store.load()
+        self._tray_icon: SystemTrayIcon | None = None
+        self._last_focused_control: wx.Window | None = None
+        self._tray_notification_shown = False
 
         panel = wx.Panel(self)
         root = wx.BoxSizer(wx.VERTICAL)
@@ -174,7 +224,10 @@ class MainFrame(wx.Frame):
         accelerator = wx.AcceleratorTable([(wx.ACCEL_NORMAL, wx.WXK_F5, wx.ID_REFRESH)])
         self.SetAcceleratorTable(accelerator)
         self.Bind(wx.EVT_MENU, self._on_refresh, id=wx.ID_REFRESH)
+        self.Bind(wx.EVT_ICONIZE, self._on_iconize)
         self.Bind(wx.EVT_CLOSE, self._on_close)
+
+        self._tray_icon = SystemTrayIcon(self)
 
         self._refresh_devices()
         self.Centre()
@@ -488,12 +541,50 @@ class MainFrame(wx.Frame):
     def _on_exit(self, _event: wx.Event) -> None:
         self.Close()
 
+    def _on_iconize(self, event: wx.IconizeEvent) -> None:
+        if (
+            event.IsIconized()
+            and self._tray_icon is not None
+            and self._tray_icon.is_available
+        ):
+            wx.CallAfter(self._hide_to_tray)
+        event.Skip()
+
+    def _hide_to_tray(self) -> None:
+        if self.IsBeingDeleted() or not self.IsShown():
+            return
+        focused = wx.Window.FindFocus()
+        if focused is not None and self.IsDescendant(focused):
+            self._last_focused_control = focused
+        self.Hide()
+        if self._tray_icon is not None and not self._tray_notification_shown:
+            self._tray_icon.notify_minimized(self.engine.is_running)
+            self._tray_notification_shown = True
+
+    def restore_from_tray(self) -> None:
+        if self.IsBeingDeleted():
+            return
+        self.Show()
+        self.Iconize(False)
+        self.Raise()
+        focused = self._last_focused_control
+        if focused is not None and not focused.IsBeingDeleted():
+            wx.CallAfter(focused.SetFocus)
+        else:
+            wx.CallAfter(self.input_choice.SetFocus)
+
+    def exit_from_tray(self) -> None:
+        if not self.IsBeingDeleted():
+            self.Close()
+
     def _on_audio_error(self, message: str) -> None:
         wx.CallAfter(self._handle_audio_error, message)
 
     def _handle_audio_error(self, message: str) -> None:
         if self.IsBeingDeleted():
             return
+        if not self.IsShown():
+            self.restore_from_tray()
         self._set_routing_controls_enabled(True)
         self.toggle_button.SetLabel("&Ativar mesa")
         self.status.ChangeValue("Desativado após uma falha no dispositivo.")
@@ -505,6 +596,10 @@ class MainFrame(wx.Frame):
     def _on_close(self, event: wx.CloseEvent) -> None:
         self._save_preferences()
         self.engine.stop()
+        if self._tray_icon is not None:
+            self._tray_icon.RemoveIcon()
+            self._tray_icon.Destroy()
+            self._tray_icon = None
         event.Skip()
 
 

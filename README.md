@@ -29,6 +29,7 @@ entradas reconhecidas pelo Windows podem ser selecionadas diretamente.
 - Retorno da própria voz sem depender da opção “Escutar este dispositivo” do
   Windows.
 - Troca do retorno enquanto a mesa está ativa sem interromper a saída virtual.
+- Minimização para a bandeja do sistema sem interromper o áudio.
 - Preferências persistentes em JSON com recuperação de configuração inválida.
 - Buffer limitado, margem de volume e suavização de descontinuidades para evitar
   atraso crescente, saturação e estalos.
@@ -83,6 +84,18 @@ Com o VB-CABLE como exemplo:
 
 **Desativar mesa** interrompe somente a transmissão e mantém a janela aberta.
 **Encerrar programa** para o áudio e fecha o aplicativo.
+
+## Bandeja do sistema
+
+Ao minimizar a janela normalmente ou pressionar `Windows+M`, a Mini Mesa some da
+barra de tarefas e continua funcionando na bandeja do sistema. Para restaurar
+pelo teclado, pressione `Windows+B`, localize **Mini Mesa de Som** com as setas e
+pressione `Enter`. O menu do ícone também oferece **Abrir Mini Mesa de Som** e
+**Encerrar programa**.
+
+Se o Windows não conseguir criar o ícone, a janela permanece apenas minimizada
+na barra de tarefas para nunca deixar o programa inacessível. Uma falha de áudio
+restaura a janela automaticamente antes de mostrar a mensagem de erro.
 
 ## Efeitos
 
