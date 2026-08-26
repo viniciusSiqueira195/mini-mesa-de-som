@@ -8,3 +8,4 @@ dist/
 .installer-dependencies/
 installer-output/
 .tmp-*/
+/Instalar Mini Mesa de Som.exe
