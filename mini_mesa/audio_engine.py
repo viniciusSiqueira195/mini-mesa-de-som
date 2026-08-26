@@ -16,6 +16,11 @@ _HOST_API_RANKS = {
     "Windows DirectSound": 2,
     "MME": 3,
 }
+_MONITOR_API_RANKS = {
+    "Windows WASAPI": 0,
+    "Windows DirectSound": 1,
+    "MME": 2,
+}
 _DEVICE_INSTANCE_PREFIX = re.compile(r"\((?:\d+\s*-\s*)")
 
 
@@ -40,6 +45,8 @@ class AudioBackend(Protocol):
     def input_devices(self) -> Sequence[str]: ...
 
     def output_devices(self) -> Sequence[str]: ...
+
+    def monitor_devices(self) -> Sequence[str]: ...
 
     def create_stream(
         self,
@@ -84,6 +91,23 @@ class PedalboardBackend:
     def output_devices(self) -> Sequence[str]:
         self._refresh_devices()
         return tuple(self._output_ids)
+
+    def monitor_devices(self) -> Sequence[str]:
+        self._refresh_devices()
+        physical_outputs = [
+            (label, candidates)
+            for label, candidates in self._output_ids.items()
+            if "virtual" not in label.casefold()
+            and any(api in _MONITOR_API_RANKS for _device_id, api in candidates)
+        ]
+        wasapi_outputs = [
+            label
+            for label, candidates in physical_outputs
+            if any(api == "Windows WASAPI" for _device_id, api in candidates)
+        ]
+        if wasapi_outputs:
+            return tuple(wasapi_outputs)
+        return tuple(label for label, _candidates in physical_outputs)
 
     def _refresh_devices(self) -> None:
         devices = self._sd.query_devices()
@@ -138,7 +162,14 @@ class PedalboardBackend:
             input_candidates = self._input_ids[input_device]
             output_candidates = self._output_ids[output_device]
             monitor_candidates = (
-                self._output_ids[monitor_output]
+                sorted(
+                    (
+                        candidate
+                        for candidate in self._output_ids[monitor_output]
+                        if candidate[1] in _MONITOR_API_RANKS
+                    ),
+                    key=lambda candidate: _MONITOR_API_RANKS[candidate[1]],
+                )
                 if monitor_output is not None
                 else [(None, "")]
             )
@@ -189,6 +220,7 @@ class PedalboardBackend:
                     output_specs,
                 )
                 for block_size in (128, 256, 512):
+                    stream = None
                     try:
                         stream = _MultiOutputSoundDeviceStream(
                             sounddevice=self._sd,
@@ -199,7 +231,11 @@ class PedalboardBackend:
                             block_size=block_size,
                             processor=self._process_audio,
                         )
+                        if monitor_output is not None:
+                            stream.validate_start()
                     except Exception as exc:
+                        if stream is not None:
+                            stream.close()
                         last_error = exc
                         continue
 
@@ -324,6 +360,12 @@ class _BufferedAudioOutput:
                 self._queued_frames -= removed.shape[0] - self._head_offset
                 self._head_offset = 0
 
+    def clear(self) -> None:
+        with self._queue_lock:
+            self._chunks.clear()
+            self._head_offset = 0
+            self._queued_frames = 0
+
     def _on_output(self, outdata, frames, _time_info, _status) -> None:
         outdata.fill(0)
         written = 0
@@ -361,6 +403,7 @@ class _MultiOutputSoundDeviceStream:
         self._stop_event = threading.Event()
         self._first_audio = threading.Event()
         self._error: Exception | None = None
+        self._validating = False
         self._outputs: list[_BufferedAudioOutput] = []
         self._input = sounddevice.InputStream(
             device=input_id,
@@ -386,6 +429,21 @@ class _MultiOutputSoundDeviceStream:
             self._close_streams()
             raise
 
+    def validate_start(self) -> None:
+        """Start every device with silence so failing APIs can be skipped."""
+
+        self._validating = True
+        try:
+            self._input.start()
+            for output in self._outputs:
+                output.stream.start()
+        finally:
+            self._abort_streams()
+            for output in self._outputs:
+                output.clear()
+            self._first_audio.clear()
+            self._validating = False
+
     def run(self) -> None:
         try:
             self._input.start()
@@ -408,6 +466,8 @@ class _MultiOutputSoundDeviceStream:
         self._close_streams()
 
     def _on_input(self, indata, frames, _time_info, _status) -> None:
+        if self._validating:
+            return
         try:
             processed = self._processor(indata, frames)
         except Exception as exc:
@@ -426,6 +486,15 @@ class _MultiOutputSoundDeviceStream:
                 if not stream.closed:
                     stream.abort()
                     stream.close()
+            except Exception:
+                pass
+
+    def _abort_streams(self) -> None:
+        streams = [self._input, *(output.stream for output in self._outputs)]
+        for stream in streams:
+            try:
+                if stream.active:
+                    stream.abort()
             except Exception:
                 pass
 
@@ -462,6 +531,9 @@ class AudioEngine:
 
     def output_devices(self) -> tuple[str, ...]:
         return tuple(self._backend.output_devices())
+
+    def monitor_devices(self) -> tuple[str, ...]:
+        return tuple(self._backend.monitor_devices())
 
     def update_settings(self, settings: ReverbSettings) -> None:
         with self._lock:

@@ -109,6 +109,7 @@ class MainFrame(wx.Frame):
         try:
             inputs = self.engine.input_devices()
             outputs = self.engine.output_devices()
+            monitor_outputs = self.engine.monitor_devices()
         except Exception as exc:
             self._show_error(f"Não foi possível listar os dispositivos de áudio.\n\n{exc}")
             return
@@ -127,12 +128,13 @@ class MainFrame(wx.Frame):
         )
         self._replace_choices(
             self.monitor_choice,
-            outputs,
+            monitor_outputs,
             selected_monitor,
             prefer_physical_output=True,
         )
         self.SetStatusText(
-            f"{len(inputs)} entradas e {len(outputs)} saídas encontradas."
+            f"{len(inputs)} entradas, {len(outputs)} saídas e "
+            f"{len(monitor_outputs)} retornos compatíveis encontrados."
         )
 
     @staticmethod

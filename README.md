@@ -32,6 +32,11 @@ a voz processada. A saída virtual continua alimentando o Discord, TeamTalk ou
 WhatsApp ao mesmo tempo. Use preferencialmente fones; retornar o microfone para
 caixas de som pode provocar microfonia.
 
+O retorno usa preferencialmente WASAPI compartilhado. Saídas exclusivas WDM-KS
+não são oferecidas para monitoramento, pois muitos drivers não permitem que elas
+sejam sincronizadas com a captura e o cabo virtual ao mesmo tempo. Ao ativar, a
+mesa testa silenciosamente a combinação antes de começar a transmitir.
+
 A mesa tenta blocos de 128 amostras e aumenta para 256 ou 512 somente quando o
 driver não aceita o modo mais rápido. O buffer é mantido curto e descarta áudio
 antigo antes de deixar o atraso crescer. Ainda existe uma pequena latência de

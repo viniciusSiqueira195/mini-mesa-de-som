@@ -41,6 +41,9 @@ class FakeBackend:
     def output_devices(self) -> tuple[str, ...]:
         return ("CABLE Input", "Alto-falantes")
 
+    def monitor_devices(self) -> tuple[str, ...]:
+        return ("Alto-falantes",)
+
     def create_stream(
         self,
         input_device: str,
@@ -117,6 +120,7 @@ class AudioEngineTests(unittest.TestCase):
 
         self.assertEqual(engine.input_devices(), ("FIFINE AM8", "Zeus X"))
         self.assertEqual(engine.output_devices()[0], "CABLE Input")
+        self.assertEqual(engine.monitor_devices(), ("Alto-falantes",))
 
     def test_start_and_stop_one_stream(self) -> None:
         backend = FakeBackend()
