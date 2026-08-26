@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mini-mesa-de-som-teste"
+version = "0.1.0"
+description = "Mesa de som virtual simples e acessível, com reverb em tempo real."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pedalboard>=0.9.24,<1",
+    "sounddevice>=0.5.3,<1",
+    "wxPython>=4.2.3,<5",
+]
+
+[project.scripts]
+mini-mesa = "mini_mesa.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["mini_mesa*"]
