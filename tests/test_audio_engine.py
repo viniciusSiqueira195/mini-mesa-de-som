@@ -13,6 +13,7 @@ from mini_mesa.audio_engine import (
     _normalize_device_label,
 )
 from mini_mesa.settings import ReverbSettings, SpatialSettings
+from mini_mesa.voice_presets import VoicePreset
 
 
 class FakeStream:
@@ -39,6 +40,7 @@ class FakeBackend:
         self.updated_monitors: list[str | None] = []
         self.noise_reduction_enabled = False
         self.spatial_settings = SpatialSettings()
+        self.voice_preset = VoicePreset.NATURAL
 
     def input_devices(self) -> tuple[str, ...]:
         return ("FIFINE AM8", "Zeus X")
@@ -70,6 +72,9 @@ class FakeBackend:
 
     def update_spatial(self, settings: SpatialSettings) -> None:
         self.spatial_settings = settings
+
+    def update_voice_preset(self, preset: VoicePreset) -> None:
+        self.voice_preset = preset
 
 
 class FakeOutputStream:
@@ -243,6 +248,7 @@ class PedalboardProcessingTests(unittest.TestCase):
         backend._np = np
         backend._effects = effects
         backend._noise_reducer = FakeNoiseReducer()
+        backend._voice_processor = None
         backend._spatializer = None
         backend._limiter = None
         backend._sample_rate = 48_000.0
@@ -358,6 +364,26 @@ class AudioEngineTests(unittest.TestCase):
 
         self.assertEqual(backend.spatial_settings, settings)
         self.assertTrue(engine.is_running)
+        engine.stop()
+
+    def test_voice_preset_is_configured_before_starting(self) -> None:
+        backend = FakeBackend()
+        engine = AudioEngine(backend)
+
+        engine.update_voice_preset(VoicePreset.MASCULINE)
+
+        self.assertEqual(backend.voice_preset, VoicePreset.MASCULINE)
+
+    def test_voice_preset_cannot_change_while_audio_is_running(self) -> None:
+        backend = FakeBackend()
+        engine = AudioEngine(backend)
+        engine.start("Zeus X", "CABLE Input")
+        self.assertTrue(backend.stream.started.wait(timeout=1))
+
+        with self.assertRaisesRegex(RuntimeError, "Desative a mesa"):
+            engine.update_voice_preset(VoicePreset.FEMININE)
+
+        self.assertEqual(backend.voice_preset, VoicePreset.NATURAL)
         engine.stop()
 
     def test_monitor_and_virtual_output_must_be_different(self) -> None:

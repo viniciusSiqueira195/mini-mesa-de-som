@@ -5,6 +5,8 @@ import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from .voice_presets import VoicePreset
+
 
 _APP_DIRECTORY = "Mini Mesa de Som Teste"
 _PREFERENCES_FILENAME = "preferences.json"
@@ -28,6 +30,7 @@ class AppPreferences:
     noise_reduction_enabled: bool = False
     spatial_enabled: bool = False
     spatial_angle: int = 0
+    voice_preset: str = VoicePreset.NATURAL.value
 
     @classmethod
     def from_dict(cls, data: object) -> AppPreferences:
@@ -70,6 +73,7 @@ class AppPreferences:
             ),
             spatial_enabled=bool_value("spatial_enabled", defaults.spatial_enabled),
             spatial_angle=spatial_angle,
+            voice_preset=VoicePreset.from_value(data.get("voice_preset")).value,
         )
 
 
@@ -90,7 +94,7 @@ class PreferencesStore:
         try:
             with temporary_path.open("w", encoding="utf-8", newline="\n") as output:
                 json.dump(
-                    {"schema_version": 3, **asdict(preferences)},
+                    {"schema_version": 4, **asdict(preferences)},
                     output,
                     ensure_ascii=False,
                     indent=2,

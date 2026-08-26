@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import wx
+from wx.lib.scrolledpanel import ScrolledPanel
 
 from .audio_engine import AudioDependencyError, AudioEngine
 from .preferences import AppPreferences, PreferencesStore
 from .settings import ReverbSettings, SpatialSettings
+from .voice_presets import VoicePreset
+
+
+_VOICE_PRESETS = tuple(VoicePreset)
 
 
 class MainFrame(wx.Frame):
@@ -13,13 +18,13 @@ class MainFrame(wx.Frame):
         engine: AudioEngine,
         preferences_store: PreferencesStore | None = None,
     ) -> None:
-        super().__init__(None, title="Mini Mesa de Som Teste", size=(620, 750))
+        super().__init__(None, title="Mini Mesa de Som Teste", size=(640, 720))
         self.engine = engine
         self.engine.set_error_handler(self._on_audio_error)
         self.preferences_store = preferences_store or PreferencesStore()
         self.preferences = self.preferences_store.load()
 
-        panel = wx.Panel(self)
+        panel = ScrolledPanel(self)
         root = wx.BoxSizer(wx.VERTICAL)
 
         intro = wx.StaticText(
@@ -87,6 +92,21 @@ class MainFrame(wx.Frame):
         effect.Add(level_label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
         effect.Add(self.reverb_level, 0, wx.ALL | wx.EXPAND, 8)
         root.Add(effect, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
+
+        voice = wx.StaticBoxSizer(wx.VERTICAL, panel, "Preset de voz")
+        voice_label = wx.StaticText(panel, label="Preset de &voz:")
+        self.voice_preset_choice = wx.Choice(
+            panel, choices=[preset.label for preset in _VOICE_PRESETS]
+        )
+        self.voice_preset_choice.SetName("Preset de transformação da voz")
+        selected_preset = VoicePreset.from_value(self.preferences.voice_preset)
+        self.voice_preset_choice.SetSelection(_VOICE_PRESETS.index(selected_preset))
+        self.voice_preset_choice.Bind(
+            wx.EVT_CHOICE, self._on_voice_preset_changed
+        )
+        voice.Add(voice_label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
+        voice.Add(self.voice_preset_choice, 0, wx.ALL | wx.EXPAND, 8)
+        root.Add(voice, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
 
         noise_reduction = wx.StaticBoxSizer(
             wx.VERTICAL, panel, "Redução de ruído"
@@ -168,6 +188,7 @@ class MainFrame(wx.Frame):
         root.Add(self.status, 0, wx.ALL | wx.EXPAND, 12)
 
         panel.SetSizer(root)
+        panel.SetupScrolling(scroll_x=False)
         self.CreateStatusBar()
         self.SetStatusText("F5 atualiza a lista de dispositivos.")
 
@@ -303,7 +324,14 @@ class MainFrame(wx.Frame):
             noise_reduction_enabled=self.noise_reduction_checkbox.GetValue(),
             spatial_enabled=self.spatial_checkbox.GetValue(),
             spatial_angle=self.spatial_angle.GetValue(),
+            voice_preset=self._current_voice_preset().value,
         )
+
+    def _current_voice_preset(self) -> VoicePreset:
+        selection = self.voice_preset_choice.GetSelection()
+        if selection == wx.NOT_FOUND:
+            return VoicePreset.NATURAL
+        return _VOICE_PRESETS[selection]
 
     def _current_spatial_settings(self) -> SpatialSettings:
         return SpatialSettings(
@@ -346,6 +374,7 @@ class MainFrame(wx.Frame):
         self.monitor_choice.Enable(self.monitor_checkbox.GetValue())
         self.refresh_button.Enable(enabled)
         self.noise_reduction_checkbox.Enable(enabled)
+        self.voice_preset_choice.Enable(enabled)
 
     def _selected_monitor_output(self) -> str | None:
         if not self.monitor_checkbox.GetValue():
@@ -364,6 +393,7 @@ class MainFrame(wx.Frame):
         self.engine.update_noise_reduction(
             self.noise_reduction_checkbox.GetValue()
         )
+        self.engine.update_voice_preset(self._current_voice_preset())
         self.engine.update_settings(self._current_settings())
         self.engine.update_spatial(self._current_spatial_settings())
         self.engine.start(
@@ -380,6 +410,9 @@ class MainFrame(wx.Frame):
         effects = []
         if self.noise_reduction_checkbox.GetValue():
             effects.append("redução de ruído")
+        voice_preset = self._current_voice_preset()
+        if voice_preset is not VoicePreset.NATURAL:
+            effects.append(f"voz {voice_preset.label.casefold()}")
         if self.reverb_checkbox.GetValue():
             effects.append("reverb")
         if self.spatial_checkbox.GetValue():
@@ -443,6 +476,16 @@ class MainFrame(wx.Frame):
             "Redução de ruído será ativada junto com a mesa."
             if self.noise_reduction_checkbox.GetValue()
             else "Redução de ruído desativada."
+        )
+        event.Skip()
+
+    def _on_voice_preset_changed(self, event: wx.Event) -> None:
+        preset = self._current_voice_preset()
+        self._save_preferences()
+        self.SetStatusText(
+            "Voz natural selecionada."
+            if preset is VoicePreset.NATURAL
+            else f"Preset {preset.label} será aplicado ao ativar a mesa."
         )
         event.Skip()
 

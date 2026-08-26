@@ -10,6 +10,7 @@ from typing import Protocol
 from .noise_reduction import RNNOISE_SAMPLE_RATE, RNNoiseReducer
 from .settings import ReverbSettings, SpatialSettings
 from .spatial_audio import HRTFSpatializer
+from .voice_presets import StreamingVoicePreset, VoicePreset
 
 
 _HOST_API_RANKS = {
@@ -66,6 +67,8 @@ class AudioBackend(Protocol):
 
     def update_spatial(self, settings: SpatialSettings) -> None: ...
 
+    def update_voice_preset(self, preset: VoicePreset) -> None: ...
+
 
 class PedalboardBackend:
     """PortAudio routing with native DSP powered by Spotify's Pedalboard."""
@@ -91,6 +94,8 @@ class PedalboardBackend:
         self._limiter = None
         self._spatializer: HRTFSpatializer | None = None
         self._spatial_settings = SpatialSettings()
+        self._voice_preset = VoicePreset.NATURAL
+        self._voice_processor: StreamingVoicePreset | None = None
         self._active_stream: _MultiOutputSoundDeviceStream | None = None
         self._noise_reduction_enabled = False
         self._noise_reducer: RNNoiseReducer | None = None
@@ -259,6 +264,9 @@ class PedalboardBackend:
                     self._reverb = reverb
                     with self._processing_lock:
                         self._replace_noise_reducer()
+                        self._voice_processor = StreamingVoicePreset(
+                            self._voice_preset, sample_rate
+                        )
                         self._spatializer = HRTFSpatializer(sample_rate)
                         self._spatializer.update(self._spatial_settings)
                     self._active_stream = stream
@@ -329,6 +337,8 @@ class PedalboardBackend:
             mono_input = self._np.mean(indata, axis=1, dtype=self._np.float32)
             if self._noise_reducer is not None:
                 mono_input = self._noise_reducer.process(mono_input)
+            if self._voice_processor is not None:
+                mono_input = self._voice_processor.process(mono_input)
             reverberated = self._effects.process(
                 mono_input[self._np.newaxis, :],
                 self._sample_rate,
@@ -374,6 +384,11 @@ class PedalboardBackend:
             self._spatial_settings = settings
             if self._spatializer is not None:
                 self._spatializer.update(settings)
+
+    def update_voice_preset(self, preset: VoicePreset) -> None:
+        if not isinstance(preset, VoicePreset):
+            raise TypeError("Preset de voz inválido.")
+        self._voice_preset = preset
 
     def _replace_noise_reducer(self) -> None:
         previous = self._noise_reducer
@@ -772,6 +787,7 @@ class AudioEngine:
         self._monitor_output: str | None = None
         self._noise_reduction_enabled = False
         self._spatial_settings = SpatialSettings()
+        self._voice_preset = VoicePreset.NATURAL
         self._stopping = False
         self._lock = threading.RLock()
 
@@ -887,6 +903,17 @@ class AudioEngine:
         with self._lock:
             self._spatial_settings = settings
             self._backend.update_spatial(settings)
+
+    def update_voice_preset(self, preset: VoicePreset) -> None:
+        if not isinstance(preset, VoicePreset):
+            raise TypeError("Preset de voz inválido.")
+        with self._lock:
+            if self._stream is not None:
+                raise RuntimeError(
+                    "Desative a mesa antes de alterar o preset de voz."
+                )
+            self._backend.update_voice_preset(preset)
+            self._voice_preset = preset
 
     def stop(self, *, timeout: float = 2.0) -> None:
         with self._lock:

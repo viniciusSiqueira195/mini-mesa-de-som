@@ -23,13 +23,14 @@ class PreferencesStoreTests(unittest.TestCase):
                 noise_reduction_enabled=True,
                 spatial_enabled=True,
                 spatial_angle=-90,
+                voice_preset="masculine",
             )
 
             store.save(expected)
 
             self.assertEqual(store.load(), expected)
             saved = json.loads(path.read_text(encoding="utf-8"))
-            self.assertEqual(saved["schema_version"], 3)
+            self.assertEqual(saved["schema_version"], 4)
             self.assertEqual(saved["input_device"], "Microfone Áudio")
 
     def test_invalid_file_falls_back_to_defaults(self) -> None:
@@ -49,6 +50,7 @@ class PreferencesStoreTests(unittest.TestCase):
                 "noise_reduction_enabled": True,
                 "spatial_enabled": True,
                 "spatial_angle": 900,
+                "voice_preset": "alienígena",
             }
         )
 
@@ -59,6 +61,7 @@ class PreferencesStoreTests(unittest.TestCase):
         self.assertTrue(preferences.noise_reduction_enabled)
         self.assertTrue(preferences.spatial_enabled)
         self.assertEqual(preferences.spatial_angle, 0)
+        self.assertEqual(preferences.voice_preset, "natural")
 
 
 if __name__ == "__main__":
