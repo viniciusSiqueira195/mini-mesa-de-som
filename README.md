@@ -21,6 +21,10 @@ instalado. Com o VB-CABLE, por exemplo:
 3. No Discord ou TeamTalk, selecione `CABLE Output` como microfone.
 4. Ative o reverb na Mini Mesa.
 
+O único ajuste do efeito é **Nível de reverb**, de 0 a 100. Internamente, esse
+controle equilibra a quantidade do efeito, o tamanho do ambiente simulado e a
+duração da cauda. Não é necessário configurar parâmetros técnicos separados.
+
 Evite selecionar caixas de som como saída enquanto elas estiverem próximas do
 microfone: isso pode produzir microfonia.
 
@@ -45,8 +49,7 @@ mini-mesa
 
 - `Alt+M`: escolher o microfone.
 - `Alt+S`: escolher a saída virtual.
-- `Alt+R`: ajustar a quantidade de reverb.
-- `Alt+T`: ajustar o tamanho da sala.
+- `Alt+R`: ajustar o nível de reverb.
 - `Alt+A`: ativar ou desativar o processamento.
 - `F5`: atualizar a lista de dispositivos.
 

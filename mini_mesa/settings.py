@@ -12,25 +12,25 @@ def _validate_percent(name: str, value: int) -> None:
 
 @dataclass(frozen=True, slots=True)
 class ReverbSettings:
-    """Valores apresentados ao usuário, sempre expressos em porcentagem."""
+    """A single user-facing level mapped to the internal reverb parameters."""
 
-    amount_percent: int = 25
-    room_size_percent: int = 40
-    damping_percent: int = 50
+    level_percent: int = 25
 
     def __post_init__(self) -> None:
-        _validate_percent("Quantidade de reverb", self.amount_percent)
-        _validate_percent("Tamanho da sala", self.room_size_percent)
-        _validate_percent("Amortecimento", self.damping_percent)
+        _validate_percent("Nível de reverb", self.level_percent)
+
+    @property
+    def normalized_level(self) -> float:
+        return self.level_percent / 100.0
 
     @property
     def wet_level(self) -> float:
-        return self.amount_percent / 100.0
+        return self.normalized_level
 
     @property
     def room_size(self) -> float:
-        return self.room_size_percent / 100.0
+        return 0.25 + (0.60 * self.normalized_level)
 
     @property
     def damping(self) -> float:
-        return self.damping_percent / 100.0
+        return 0.55 - (0.20 * self.normalized_level)

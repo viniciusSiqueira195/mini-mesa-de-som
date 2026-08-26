@@ -8,7 +8,7 @@ from .settings import ReverbSettings
 
 class MainFrame(wx.Frame):
     def __init__(self, engine: AudioEngine) -> None:
-        super().__init__(None, title="Mini Mesa de Som Teste", size=(590, 470))
+        super().__init__(None, title="Mini Mesa de Som Teste", size=(590, 390))
         self.engine = engine
         self.engine.set_error_handler(self._on_audio_error)
 
@@ -45,15 +45,18 @@ class MainFrame(wx.Frame):
         root.Add(devices, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
 
         effect = wx.StaticBoxSizer(wx.VERTICAL, panel, "Reverb")
-        self.amount = self._add_percent_control(
-            panel, effect, "Quantidade de &reverb (%):", 25, "Quantidade de reverb"
+        level_label = wx.StaticText(panel, label="Nível de &reverb (0 a 100):")
+        self.reverb_level = wx.Slider(
+            panel,
+            value=25,
+            minValue=0,
+            maxValue=100,
+            style=wx.SL_HORIZONTAL | wx.SL_LABELS,
         )
-        self.room_size = self._add_percent_control(
-            panel, effect, "&Tamanho da sala (%):", 40, "Tamanho da sala"
-        )
-        self.damping = self._add_percent_control(
-            panel, effect, "Amortecimento (%):", 50, "Amortecimento do reverb"
-        )
+        self.reverb_level.SetName("Nível de reverb")
+        self.reverb_level.Bind(wx.EVT_SLIDER, self._on_settings_changed)
+        effect.Add(level_label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
+        effect.Add(self.reverb_level, 0, wx.ALL | wx.EXPAND, 8)
         root.Add(effect, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
 
         self.toggle_button = wx.Button(panel, label="&Ativar reverb")
@@ -83,23 +86,6 @@ class MainFrame(wx.Frame):
         self._refresh_devices()
         self.Centre()
         self.input_choice.SetFocus()
-
-    def _add_percent_control(
-        self,
-        panel: wx.Panel,
-        sizer: wx.StaticBoxSizer,
-        label: str,
-        initial: int,
-        accessible_name: str,
-    ) -> wx.SpinCtrl:
-        text = wx.StaticText(panel, label=label)
-        control = wx.SpinCtrl(panel, min=0, max=100, initial=initial)
-        control.SetName(f"{accessible_name}, porcentagem")
-        control.Bind(wx.EVT_SPINCTRL, self._on_settings_changed)
-        control.Bind(wx.EVT_TEXT, self._on_settings_changed)
-        sizer.Add(text, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
-        sizer.Add(control, 0, wx.ALL | wx.EXPAND, 8)
-        return control
 
     def _on_refresh(self, _event: wx.Event) -> None:
         self._refresh_devices()
@@ -174,15 +160,14 @@ class MainFrame(wx.Frame):
             choice.SetSelection(0)
 
     def _current_settings(self) -> ReverbSettings:
-        return ReverbSettings(
-            amount_percent=self.amount.GetValue(),
-            room_size_percent=self.room_size.GetValue(),
-            damping_percent=self.damping.GetValue(),
-        )
+        return ReverbSettings(level_percent=self.reverb_level.GetValue())
 
     def _on_settings_changed(self, event: wx.Event) -> None:
         try:
             self.engine.update_settings(self._current_settings())
+            self.SetStatusText(
+                f"Nível de reverb: {self.reverb_level.GetValue()} por cento."
+            )
         except (TypeError, ValueError):
             pass
         event.Skip()

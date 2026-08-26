@@ -58,7 +58,7 @@ class AudioEngineTests(unittest.TestCase):
     def test_start_and_stop_one_stream(self) -> None:
         backend = FakeBackend()
         engine = AudioEngine(backend)
-        settings = ReverbSettings(35, 60, 45)
+        settings = ReverbSettings(35)
         engine.update_settings(settings)
 
         engine.start("FIFINE AM8", "CABLE Input")
@@ -79,7 +79,7 @@ class AudioEngineTests(unittest.TestCase):
         engine.start("Zeus X", "CABLE Input")
         self.assertTrue(backend.stream.started.wait(timeout=1))
 
-        settings = ReverbSettings(70, 80, 20)
+        settings = ReverbSettings(70)
         engine.update_settings(settings)
 
         self.assertEqual(backend.updated_with, settings)
