@@ -19,9 +19,12 @@ class ReverbSettings:
     """A single user-facing level mapped to the internal reverb parameters."""
 
     level_percent: int = 25
+    enabled: bool = True
 
     def __post_init__(self) -> None:
         _validate_percent("Nível de reverb", self.level_percent)
+        if not isinstance(self.enabled, bool):
+            raise TypeError("Estado do reverb deve ser verdadeiro ou falso")
 
     @property
     def normalized_level(self) -> float:
@@ -29,10 +32,14 @@ class ReverbSettings:
 
     @property
     def wet_level(self) -> float:
+        if not self.enabled:
+            return 0.0
         return _MIX_HEADROOM * _MAX_WET_SHARE * self.normalized_level
 
     @property
     def dry_level(self) -> float:
+        if not self.enabled:
+            return _MIX_HEADROOM
         return _MIX_HEADROOM - self.wet_level
 
     @property

@@ -19,7 +19,7 @@ instalado. Com o VB-CABLE, por exemplo:
 1. Em **Microfone de entrada**, selecione o microfone físico.
 2. Em **Saída virtual**, selecione `CABLE Input`.
 3. No Discord ou TeamTalk, selecione `CABLE Output` como microfone.
-4. Ative o reverb na Mini Mesa.
+4. Clique em **Ativar mesa** e marque **Ativar efeito de reverb**.
 
 O único ajuste do efeito é **Nível de reverb**, de 0 a 100. Internamente, esse
 controle equilibra a quantidade do efeito, o tamanho do ambiente simulado e a
@@ -27,6 +27,20 @@ duração da cauda. Não é necessário configurar parâmetros técnicos separad
 A voz limpa e o efeito são misturados proporcionalmente com margem automática
 de volume, evitando que a soma dos dois sinais sature ou acione o limitador o
 tempo inteiro.
+
+O reverb pode ser ligado ou desligado enquanto a mesa está funcionando. Ao
+desligá-lo, a voz limpa continua sendo enviada normalmente para a saída virtual.
+Isso permite acrescentar outros efeitos independentes no futuro sem interromper
+todo o fluxo de áudio.
+
+## Preferências
+
+A Mini Mesa guarda automaticamente em JSON o microfone, a saída virtual, o
+retorno, o estado do reverb e seu nível. No Windows, o arquivo fica em
+`%APPDATA%\Mini Mesa de Som Teste\preferences.json`. A gravação é feita primeiro
+em um arquivo temporário para reduzir o risco de corrupção. Se o JSON estiver
+inválido ou um dispositivo salvo não estiver mais conectado, a mesa inicia com
+valores seguros e escolhe um dispositivo disponível.
 
 ## Retorno da própria voz
 
@@ -82,8 +96,9 @@ mini-mesa
 - `Alt+S`: escolher a saída virtual.
 - `Alt+O`: ativar ou desativar o retorno.
 - `Alt+T`: escolher o dispositivo de retorno.
+- `Alt+E`: ativar ou desativar somente o efeito de reverb.
 - `Alt+R`: ajustar o nível de reverb.
-- `Alt+A`: ativar ou desativar o processamento.
+- `Alt+A`: ativar ou desativar a mesa.
 - `F5`: atualizar a lista de dispositivos.
 
 ## Testes
@@ -98,7 +113,7 @@ python -m unittest discover -s tests -v
 
 Este é um MVP. Ele usa PortAudio para selecionar os dispositivos por
 identificadores estáveis e Pedalboard para processar o reverb em código nativo.
-Ele já separa a interface do motor de áudio, permite trocar o
-microfone sem alterar o código e protege contra duas transmissões simultâneas.
-Configuração persistente, medidor de nível, presets e empacotamento serão as
-próximas etapas.
+Ele já separa a interface do motor de áudio, permite trocar o microfone sem
+alterar o código, protege contra duas transmissões simultâneas e mantém as
+preferências em JSON. Medidor de nível, presets, novos efeitos e empacotamento
+são possíveis próximas etapas.

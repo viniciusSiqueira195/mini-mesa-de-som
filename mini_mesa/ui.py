@@ -3,14 +3,21 @@ from __future__ import annotations
 import wx
 
 from .audio_engine import AudioDependencyError, AudioEngine
+from .preferences import AppPreferences, PreferencesStore
 from .settings import ReverbSettings
 
 
 class MainFrame(wx.Frame):
-    def __init__(self, engine: AudioEngine) -> None:
-        super().__init__(None, title="Mini Mesa de Som Teste", size=(590, 500))
+    def __init__(
+        self,
+        engine: AudioEngine,
+        preferences_store: PreferencesStore | None = None,
+    ) -> None:
+        super().__init__(None, title="Mini Mesa de Som Teste", size=(590, 540))
         self.engine = engine
         self.engine.set_error_handler(self._on_audio_error)
+        self.preferences_store = preferences_store or PreferencesStore()
+        self.preferences = self.preferences_store.load()
 
         panel = wx.Panel(self)
         root = wx.BoxSizer(wx.VERTICAL)
@@ -30,24 +37,28 @@ class MainFrame(wx.Frame):
         input_label = wx.StaticText(panel, label="&Microfone de entrada:")
         self.input_choice = wx.Choice(panel)
         self.input_choice.SetName("Microfone de entrada")
+        self.input_choice.Bind(wx.EVT_CHOICE, self._on_preference_changed)
         devices.Add(input_label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
         devices.Add(self.input_choice, 0, wx.ALL | wx.EXPAND, 8)
 
         output_label = wx.StaticText(panel, label="&Saída virtual:")
         self.output_choice = wx.Choice(panel)
         self.output_choice.SetName("Saída virtual para Discord ou TeamTalk")
+        self.output_choice.Bind(wx.EVT_CHOICE, self._on_preference_changed)
         devices.Add(output_label, 0, wx.LEFT | wx.RIGHT, 8)
         devices.Add(self.output_choice, 0, wx.ALL | wx.EXPAND, 8)
 
         self.monitor_checkbox = wx.CheckBox(panel, label="&Ouvir retorno")
         self.monitor_checkbox.SetName("Ouvir retorno do microfone processado")
+        self.monitor_checkbox.SetValue(self.preferences.monitor_enabled)
         self.monitor_checkbox.Bind(wx.EVT_CHECKBOX, self._on_monitor_toggled)
         devices.Add(self.monitor_checkbox, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 8)
 
         monitor_label = wx.StaticText(panel, label="Dispositivo de re&torno:")
         self.monitor_choice = wx.Choice(panel)
         self.monitor_choice.SetName("Dispositivo para ouvir o retorno")
-        self.monitor_choice.Disable()
+        self.monitor_choice.Enable(self.preferences.monitor_enabled)
+        self.monitor_choice.Bind(wx.EVT_CHOICE, self._on_preference_changed)
         devices.Add(monitor_label, 0, wx.LEFT | wx.RIGHT, 8)
         devices.Add(self.monitor_choice, 0, wx.ALL | wx.EXPAND, 8)
 
@@ -57,21 +68,27 @@ class MainFrame(wx.Frame):
         root.Add(devices, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
 
         effect = wx.StaticBoxSizer(wx.VERTICAL, panel, "Reverb")
+        self.reverb_checkbox = wx.CheckBox(panel, label="Ativar &efeito de reverb")
+        self.reverb_checkbox.SetName("Ativar efeito de reverb")
+        self.reverb_checkbox.SetValue(self.preferences.reverb_enabled)
+        self.reverb_checkbox.Bind(wx.EVT_CHECKBOX, self._on_settings_changed)
         level_label = wx.StaticText(panel, label="Nível de &reverb (0 a 100):")
         self.reverb_level = wx.Slider(
             panel,
-            value=25,
+            value=self.preferences.reverb_level,
             minValue=0,
             maxValue=100,
             style=wx.SL_HORIZONTAL | wx.SL_LABELS,
         )
         self.reverb_level.SetName("Nível de reverb")
+        self.reverb_level.Enable(self.preferences.reverb_enabled)
         self.reverb_level.Bind(wx.EVT_SLIDER, self._on_settings_changed)
+        effect.Add(self.reverb_checkbox, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
         effect.Add(level_label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
         effect.Add(self.reverb_level, 0, wx.ALL | wx.EXPAND, 8)
         root.Add(effect, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
 
-        self.toggle_button = wx.Button(panel, label="&Ativar reverb")
+        self.toggle_button = wx.Button(panel, label="&Ativar mesa")
         self.toggle_button.SetDefault()
         self.toggle_button.Bind(wx.EVT_BUTTON, self._on_toggle)
         root.Add(self.toggle_button, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
@@ -103,9 +120,15 @@ class MainFrame(wx.Frame):
         self._refresh_devices()
 
     def _refresh_devices(self) -> None:
-        selected_input = self.input_choice.GetStringSelection()
-        selected_output = self.output_choice.GetStringSelection()
-        selected_monitor = self.monitor_choice.GetStringSelection()
+        selected_input = (
+            self.input_choice.GetStringSelection() or self.preferences.input_device
+        )
+        selected_output = (
+            self.output_choice.GetStringSelection() or self.preferences.output_device
+        )
+        selected_monitor = (
+            self.monitor_choice.GetStringSelection() or self.preferences.monitor_device
+        )
         try:
             inputs = self.engine.input_devices()
             outputs = self.engine.output_devices()
@@ -200,11 +223,36 @@ class MainFrame(wx.Frame):
             choice.SetSelection(0)
 
     def _current_settings(self) -> ReverbSettings:
-        return ReverbSettings(level_percent=self.reverb_level.GetValue())
+        return ReverbSettings(
+            level_percent=self.reverb_level.GetValue(),
+            enabled=self.reverb_checkbox.GetValue(),
+        )
+
+    def _current_preferences(self) -> AppPreferences:
+        return AppPreferences(
+            input_device=self.input_choice.GetStringSelection(),
+            output_device=self.output_choice.GetStringSelection(),
+            monitor_enabled=self.monitor_checkbox.GetValue(),
+            monitor_device=self.monitor_choice.GetStringSelection(),
+            reverb_enabled=self.reverb_checkbox.GetValue(),
+            reverb_level=self.reverb_level.GetValue(),
+        )
+
+    def _save_preferences(self) -> None:
+        self.preferences = self._current_preferences()
+        try:
+            self.preferences_store.save(self.preferences)
+        except OSError as exc:
+            self.SetStatusText(f"Não foi possível salvar as preferências: {exc}")
+
+    def _on_preference_changed(self, event: wx.Event) -> None:
+        self._save_preferences()
+        event.Skip()
 
     def _on_monitor_toggled(self, _event: wx.Event) -> None:
         enabled = self.monitor_checkbox.GetValue()
         self.monitor_choice.Enable(enabled)
+        self._save_preferences()
         self.SetStatusText(
             "Retorno ativado; escolha onde deseja ouvir sua voz."
             if enabled
@@ -220,10 +268,16 @@ class MainFrame(wx.Frame):
 
     def _on_settings_changed(self, event: wx.Event) -> None:
         try:
+            reverb_enabled = self.reverb_checkbox.GetValue()
+            self.reverb_level.Enable(reverb_enabled)
             self.engine.update_settings(self._current_settings())
-            self.SetStatusText(
-                f"Nível de reverb: {self.reverb_level.GetValue()} por cento."
-            )
+            self._save_preferences()
+            if reverb_enabled:
+                self.SetStatusText(
+                    f"Reverb ativo em {self.reverb_level.GetValue()} por cento."
+                )
+            else:
+                self.SetStatusText("Reverb desativado; a mesa continua funcionando.")
         except (TypeError, ValueError):
             pass
         event.Skip()
@@ -232,9 +286,9 @@ class MainFrame(wx.Frame):
         if self.engine.is_running:
             self.engine.stop()
             self._set_routing_controls_enabled(True)
-            self.toggle_button.SetLabel("&Ativar reverb")
+            self.toggle_button.SetLabel("&Ativar mesa")
             self.status.ChangeValue("Desativado.")
-            self.SetStatusText("Processamento desativado.")
+            self.SetStatusText("Mesa desativada.")
             return
 
         try:
@@ -252,13 +306,18 @@ class MainFrame(wx.Frame):
             self._show_error(str(exc))
             return
 
+        self._save_preferences()
         self._set_routing_controls_enabled(False)
-        self.toggle_button.SetLabel("Des&ativar reverb")
+        self.toggle_button.SetLabel("Des&ativar mesa")
         self.status.ChangeValue(
-            "Ativo. O áudio processado está sendo enviado para a saída virtual"
+            "Mesa ativa. O áudio está sendo enviado para a saída virtual"
             + (" e para o retorno." if self.monitor_checkbox.GetValue() else ".")
         )
-        self.SetStatusText("Reverb ativo.")
+        self.SetStatusText(
+            "Mesa ativa com reverb."
+            if self.reverb_checkbox.GetValue()
+            else "Mesa ativa sem reverb."
+        )
 
     def _on_audio_error(self, message: str) -> None:
         wx.CallAfter(self._handle_audio_error, message)
@@ -267,7 +326,7 @@ class MainFrame(wx.Frame):
         if self.IsBeingDeleted():
             return
         self._set_routing_controls_enabled(True)
-        self.toggle_button.SetLabel("&Ativar reverb")
+        self.toggle_button.SetLabel("&Ativar mesa")
         self.status.ChangeValue("Desativado após uma falha no dispositivo.")
         self._show_error(f"O processamento de áudio foi interrompido.\n\n{message}")
 
@@ -275,6 +334,7 @@ class MainFrame(wx.Frame):
         wx.MessageBox(message, "Mini Mesa de Som Teste", wx.OK | wx.ICON_ERROR, self)
 
     def _on_close(self, event: wx.CloseEvent) -> None:
+        self._save_preferences()
         self.engine.stop()
         event.Skip()
 

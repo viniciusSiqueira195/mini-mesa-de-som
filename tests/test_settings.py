@@ -30,6 +30,12 @@ class ReverbSettingsTests(unittest.TestCase):
             settings = ReverbSettings(level)
             self.assertAlmostEqual(settings.dry_level + settings.wet_level, 0.9)
 
+    def test_disabled_reverb_keeps_the_dry_audio_flowing(self) -> None:
+        settings = ReverbSettings(level_percent=100, enabled=False)
+
+        self.assertEqual(settings.wet_level, 0.0)
+        self.assertEqual(settings.dry_level, 0.9)
+
     def test_out_of_range_value_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
             ReverbSettings(level_percent=101)
@@ -37,6 +43,10 @@ class ReverbSettingsTests(unittest.TestCase):
     def test_non_integer_value_is_rejected(self) -> None:
         with self.assertRaises(TypeError):
             ReverbSettings(level_percent=40.5)  # type: ignore[arg-type]
+
+    def test_non_boolean_enabled_value_is_rejected(self) -> None:
+        with self.assertRaises(TypeError):
+            ReverbSettings(enabled=1)  # type: ignore[arg-type]
 
 
 if __name__ == "__main__":
