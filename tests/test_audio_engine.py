@@ -87,6 +87,8 @@ class BufferedAudioOutputTests(unittest.TestCase):
 
         self.assertEqual(output._queued_frames, 16)
         self.assertEqual(output._chunks[0][0], 1)
+        self.assertEqual(output._dropped_block_count, 1)
+        self.assertTrue(output._needs_crossfade)
         self.assertEqual(sounddevice.output_arguments["blocksize"], 4)
 
     def test_mono_processed_audio_is_copied_to_both_return_channels(self) -> None:
@@ -97,6 +99,7 @@ class BufferedAudioOutputTests(unittest.TestCase):
             output_channels=2,
             block_size=2,
         )
+        output._underrun = False
         output.push(np.array([0.25, -0.5], dtype=np.float32))
         destination = np.zeros((2, 2), dtype=np.float32)
 
@@ -106,6 +109,27 @@ class BufferedAudioOutputTests(unittest.TestCase):
             destination,
             np.array([[0.25, 0.25], [-0.5, -0.5]], dtype=np.float32),
         )
+
+    def test_underrun_fades_to_silence_instead_of_cutting_abruptly(self) -> None:
+        output = _BufferedAudioOutput(
+            sounddevice=FakeSoundDevice(),
+            output_id=7,
+            sample_rate=48_000,
+            output_channels=2,
+            block_size=4,
+        )
+        output._underrun = False
+        output._last_sample = 1.0
+        destination = np.zeros((4, 2), dtype=np.float32)
+
+        output._on_output(destination, 4, None, None)
+
+        np.testing.assert_allclose(
+            destination[:, 0],
+            np.array([0.75, 0.5, 0.25, 0.0], dtype=np.float32),
+        )
+        np.testing.assert_array_equal(destination[:, 0], destination[:, 1])
+        self.assertEqual(output._underrun_count, 1)
 
 
 class AudioEngineTests(unittest.TestCase):

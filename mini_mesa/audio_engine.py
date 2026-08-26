@@ -219,7 +219,10 @@ class PedalboardBackend:
                     float(input_info["default_samplerate"]),
                     output_specs,
                 )
-                for block_size in (128, 256, 512):
+                block_sizes = (
+                    (256, 512) if monitor_output is not None else (512, 256)
+                )
+                for block_size in block_sizes:
                     stream = None
                     try:
                         stream = _MultiOutputSoundDeviceStream(
@@ -342,6 +345,11 @@ class _BufferedAudioOutput:
         self._queued_frames = 0
         self._max_queued_frames = self._block_size * 4
         self._queue_lock = threading.Lock()
+        self._last_sample = 0.0
+        self._underrun = True
+        self._needs_crossfade = False
+        self._underrun_count = 0
+        self._dropped_block_count = 0
         self.stream = sounddevice.OutputStream(
             device=output_id,
             samplerate=sample_rate,
@@ -360,29 +368,57 @@ class _BufferedAudioOutput:
                 removed = self._chunks.popleft()
                 self._queued_frames -= removed.shape[0] - self._head_offset
                 self._head_offset = 0
+                self._needs_crossfade = True
+                self._dropped_block_count += 1
 
     def clear(self) -> None:
         with self._queue_lock:
             self._chunks.clear()
             self._head_offset = 0
             self._queued_frames = 0
+            self._last_sample = 0.0
+            self._underrun = True
+            self._needs_crossfade = False
 
     def _on_output(self, outdata, frames, _time_info, _status) -> None:
         outdata.fill(0)
         written = 0
         with self._queue_lock:
+            if _status:
+                self._needs_crossfade = True
             while written < frames and self._chunks:
                 chunk = self._chunks[0]
                 available = chunk.shape[0] - self._head_offset
                 count = min(frames - written, available)
                 mono = chunk[self._head_offset : self._head_offset + count]
                 outdata[written : written + count, :] = mono[:, None]
+                if self._underrun or self._needs_crossfade:
+                    fade_from = 0.0 if self._underrun else self._last_sample
+                    fade_frames = min(32, count)
+                    for index in range(fade_frames):
+                        amount = (index + 1) / fade_frames
+                        sample = fade_from * (1.0 - amount) + float(mono[index]) * amount
+                        outdata[written + index, :] = sample
+                    self._underrun = False
+                    self._needs_crossfade = False
                 written += count
                 self._head_offset += count
                 self._queued_frames -= count
+                self._last_sample = float(mono[-1])
                 if self._head_offset == chunk.shape[0]:
                     self._chunks.popleft()
                     self._head_offset = 0
+
+            if written < frames:
+                missing_frames = frames - written
+                fade_frames = min(32, missing_frames)
+                for index in range(fade_frames):
+                    amount = (index + 1) / fade_frames
+                    outdata[written + index, :] = self._last_sample * (1.0 - amount)
+                self._last_sample = 0.0
+                if not self._underrun:
+                    self._underrun_count += 1
+                self._underrun = True
 
 
 class _MultiOutputSoundDeviceStream:
@@ -403,6 +439,8 @@ class _MultiOutputSoundDeviceStream:
         self._processor = processor
         self._stop_event = threading.Event()
         self._first_audio = threading.Event()
+        self._captured_blocks = 0
+        self._prefill_blocks = 2
         self._error: Exception | None = None
         self._validating = False
         self._outputs: list[_BufferedAudioOutput] = []
@@ -443,12 +481,13 @@ class _MultiOutputSoundDeviceStream:
             for output in self._outputs:
                 output.clear()
             self._first_audio.clear()
+            self._captured_blocks = 0
             self._validating = False
 
     def run(self) -> None:
         try:
             self._input.start()
-            self._first_audio.wait(timeout=0.05)
+            self._first_audio.wait(timeout=0.15)
             for output in self._outputs:
                 output.stream.start()
             while (
@@ -478,7 +517,9 @@ class _MultiOutputSoundDeviceStream:
 
         for output in self._outputs:
             output.push(processed)
-        self._first_audio.set()
+        self._captured_blocks += 1
+        if self._captured_blocks >= self._prefill_blocks:
+            self._first_audio.set()
 
     def _close_streams(self) -> None:
         streams = [self._input, *(output.stream for output in self._outputs)]

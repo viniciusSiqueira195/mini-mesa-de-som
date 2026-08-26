@@ -40,11 +40,12 @@ não são oferecidas para monitoramento, pois muitos drivers não permitem que e
 sejam sincronizadas com a captura e o cabo virtual ao mesmo tempo. Ao ativar, a
 mesa testa silenciosamente a combinação antes de começar a transmitir.
 
-A mesa tenta blocos de 128 amostras e aumenta para 256 ou 512 somente quando o
-driver não aceita o modo mais rápido. O buffer é mantido curto e descarta áudio
-antigo antes de deixar o atraso crescer. Ainda existe uma pequena latência de
-captura, processamento e reprodução; retorno com reverb não pode ser literalmente
-instantâneo.
+A mesa usa blocos de 256 amostras com retorno e 512 sem retorno, recorrendo ao
+outro tamanho se o driver não aceitar a primeira opção. Antes de iniciar as saídas,
+dois blocos são preparados para absorver pequenas oscilações do Windows. O buffer
+continua curto e suaviza faltas ou descartes de áudio para evitar estalos. Ainda
+existe uma pequena latência de captura, processamento e reprodução; o retorno não
+pode ser literalmente instantâneo.
 
 Evite selecionar caixas de som como saída enquanto elas estiverem próximas do
 microfone: isso pode produzir microfonia.
