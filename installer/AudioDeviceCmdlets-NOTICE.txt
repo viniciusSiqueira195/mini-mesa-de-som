@@ -1,0 +1,9 @@
+AudioDeviceCmdlets 3.1.0.2
+Copyright (c) 2016-2022 Francois Gendron
+
+Distribuído sob a licença MIT.
+Projeto: https://github.com/frgnca/AudioDeviceCmdlets
+Licença: https://github.com/frgnca/AudioDeviceCmdlets/blob/master/LICENSE
+
+O módulo é usado somente durante a instalação opcional do VB-CABLE para salvar
+e restaurar os dispositivos de reprodução e gravação padrão do usuário.

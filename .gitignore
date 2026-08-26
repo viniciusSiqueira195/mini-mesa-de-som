@@ -5,3 +5,6 @@ __pycache__/
 .venv/
 build/
 dist/
+.installer-dependencies/
+installer-output/
+.tmp-*/

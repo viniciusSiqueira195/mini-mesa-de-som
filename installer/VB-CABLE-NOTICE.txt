@@ -1,0 +1,10 @@
+VB-CABLE é um produto donationware da VB-Audio Software.
+
+Origem oficial: https://www.vb-cable.com/
+Licenciamento e contribuições: https://vb-audio.com/Services/licensing.htm
+
+O pacote oficial é distribuído sem modificações. Todas as participações e
+doações para o desenvolvimento do VB-CABLE são bem-vindas.
+
+O VB-CABLE é um componente independente e compartilhado. A desinstalação da
+Mini Mesa de Som não remove o driver automaticamente.

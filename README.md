@@ -5,8 +5,9 @@ com acessibilidade como requisito central. A Mini Mesa recebe qualquer microfone
 reconhecido pelo sistema, aplica efeitos em tempo real e envia o resultado para
 um cabo de áudio virtual usado pelo Discord, TeamTalk, WhatsApp ou outro programa.
 
-> Projeto experimental em desenvolvimento ativo. A interface e as preferências
-> já são utilizáveis, mas ainda não há uma versão empacotada para distribuição.
+> Projeto experimental em desenvolvimento ativo. A interface, as preferências e
+> o instalador Windows já são utilizáveis, mas a versão ainda precisa de testes
+> em diferentes computadores e interfaces de áudio.
 
 ## Por que este projeto existe
 
@@ -72,6 +73,48 @@ Depois da instalação, também é possível iniciar com:
 ```powershell
 mini-mesa
 ```
+
+## Instalador para Windows
+
+O instalador coloca o aplicativo em `%LOCALAPPDATA%\Programs`, portanto não
+precisa de privilégios administrativos para instalar a Mini Mesa. A etapa
+opcional do VB-CABLE é marcada por padrão e solicita elevação somente se o
+driver realmente precisar ser instalado.
+
+Antes de instalar o driver, o processo guarda separadamente os dispositivos
+padrão de reprodução, comunicação, gravação e gravação para comunicação. Depois
+ele restaura os quatro. Se o VB-CABLE oficial já estiver presente — inclusive
+com endpoints desativados — a instalação do driver é ignorada automaticamente.
+VoiceMeeter e outros produtos da VB-Audio não são confundidos com o cabo exigido
+pela mesa.
+
+O VB-CABLE é um produto donationware da VB-Audio, obtido de
+[vb-cable.com](https://vb-cable.com/). O instalador da Mini Mesa não altera os
+dispositivos padrão de propósito e não remove o cabo na desinstalação, pois ele
+pode estar sendo usado por outros programas. A instalação inicial do driver
+pode exigir reinicialização do Windows.
+
+### Gerando o instalador
+
+Instale o Inno Setup 6 e prepare o ambiente uma vez:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e ".[build]"
+winget install --id JRSoftware.InnoSetup --exact
+```
+
+Depois execute:
+
+```powershell
+.\tools\build_installer.ps1
+```
+
+O script roda os testes, empacota o programa com PyInstaller, baixa os pacotes
+oficiais do VB-CABLE e AudioDeviceCmdlets com verificação SHA-256 e gera
+`installer-output\MiniMesaDeSom-Setup-0.1.0.exe`. O aplicativo é empacotado em
+uma pasta interna para dar mais estabilidade às bibliotecas nativas de áudio;
+para o usuário, a entrega continua sendo um único instalador.
 
 ## Configuração do cabo virtual
 
@@ -189,8 +232,8 @@ microfones físicos.
 
 - Testes auditivos do HRTF em diferentes cabos virtuais e aplicativos.
 - Medidor de nível acessível.
-- Presets de efeitos.
-- Empacotamento para usuários sem ambiente Python.
+- Assinatura digital do executável e do instalador.
+- Testes do instalador em máquinas limpas.
 
 ## Créditos técnicos
 
@@ -201,3 +244,5 @@ microfones físicos.
   binaurais de Bill Gardner e Keith Martin usadas pelo áudio espacial.
 - [PortAudio](https://www.portaudio.com/) por meio do sounddevice.
 - [wxPython](https://wxpython.org/) na interface nativa.
+- [VB-CABLE](https://vb-cable.com/), cabo virtual donationware opcional incluído
+  no instalador.
