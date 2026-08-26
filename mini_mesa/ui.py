@@ -88,10 +88,17 @@ class MainFrame(wx.Frame):
         effect.Add(self.reverb_level, 0, wx.ALL | wx.EXPAND, 8)
         root.Add(effect, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
 
+        actions = wx.BoxSizer(wx.HORIZONTAL)
         self.toggle_button = wx.Button(panel, label="&Ativar mesa")
         self.toggle_button.SetDefault()
         self.toggle_button.Bind(wx.EVT_BUTTON, self._on_toggle)
-        root.Add(self.toggle_button, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
+        actions.Add(self.toggle_button, 1, wx.RIGHT | wx.EXPAND, 6)
+
+        self.exit_button = wx.Button(panel, label="En&cerrar programa")
+        self.exit_button.SetName("Encerrar a Mini Mesa de Som")
+        self.exit_button.Bind(wx.EVT_BUTTON, self._on_exit)
+        actions.Add(self.exit_button, 1, wx.LEFT | wx.EXPAND, 6)
+        root.Add(actions, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
 
         status_label = wx.StaticText(panel, label="Estado do processamento:")
         self.status = wx.TextCtrl(
@@ -246,13 +253,20 @@ class MainFrame(wx.Frame):
             self.SetStatusText(f"Não foi possível salvar as preferências: {exc}")
 
     def _on_preference_changed(self, event: wx.Event) -> None:
+        previous_monitor = self._saved_monitor_output()
         self._save_preferences()
+        if event.GetEventObject() is self.monitor_choice and self.engine.is_running:
+            self._restart_running_route(previous_monitor)
         event.Skip()
 
     def _on_monitor_toggled(self, _event: wx.Event) -> None:
+        previous_monitor = self._saved_monitor_output()
         enabled = self.monitor_checkbox.GetValue()
         self.monitor_choice.Enable(enabled)
         self._save_preferences()
+        if self.engine.is_running:
+            self._restart_running_route(previous_monitor)
+            return
         self.SetStatusText(
             "Retorno ativado; escolha onde deseja ouvir sua voz."
             if enabled
@@ -262,9 +276,82 @@ class MainFrame(wx.Frame):
     def _set_routing_controls_enabled(self, enabled: bool) -> None:
         self.input_choice.Enable(enabled)
         self.output_choice.Enable(enabled)
-        self.monitor_checkbox.Enable(enabled)
-        self.monitor_choice.Enable(enabled and self.monitor_checkbox.GetValue())
+        self.monitor_checkbox.Enable()
+        self.monitor_choice.Enable(self.monitor_checkbox.GetValue())
         self.refresh_button.Enable(enabled)
+
+    def _selected_monitor_output(self) -> str | None:
+        if not self.monitor_checkbox.GetValue():
+            return None
+        selected = self.monitor_choice.GetStringSelection()
+        if not selected:
+            raise ValueError("Selecione um dispositivo para ouvir o retorno.")
+        return selected
+
+    def _saved_monitor_output(self) -> str | None:
+        if not self.preferences.monitor_enabled:
+            return None
+        return self.preferences.monitor_device or None
+
+    def _start_route(self, monitor_output: str | None) -> None:
+        self.engine.update_settings(self._current_settings())
+        self.engine.start(
+            self.input_choice.GetStringSelection(),
+            self.output_choice.GetStringSelection(),
+            monitor_output,
+        )
+
+    def _start_selected_route(self) -> None:
+        self._start_route(self._selected_monitor_output())
+
+    def _show_running_state(self) -> None:
+        monitoring = self.monitor_checkbox.GetValue()
+        self.status.ChangeValue(
+            "Mesa ativa. O áudio está sendo enviado para a saída virtual"
+            + (" e para o retorno." if monitoring else ".")
+        )
+        self.SetStatusText(
+            "Mesa ativa com reverb."
+            if self.reverb_checkbox.GetValue()
+            else "Mesa ativa sem reverb."
+        )
+
+    def _restart_running_route(self, previous_monitor: str | None) -> None:
+        self.SetStatusText("Atualizando a rota de retorno...")
+        self.engine.stop()
+        try:
+            self._start_selected_route()
+        except Exception as exc:
+            try:
+                self._start_route(previous_monitor)
+            except Exception:
+                self._set_routing_controls_enabled(True)
+                self.toggle_button.SetLabel("&Ativar mesa")
+                self.status.ChangeValue(
+                    "Mesa desativada após falha ao alterar o retorno."
+                )
+                self._show_error(
+                    "Não foi possível alterar o retorno nem restaurar a rota "
+                    "anterior; a mesa foi desativada.\n\n"
+                    f"{exc}"
+                )
+                return
+
+            self.monitor_checkbox.SetValue(previous_monitor is not None)
+            if previous_monitor is not None:
+                self.monitor_choice.SetStringSelection(previous_monitor)
+            self.monitor_choice.Enable(previous_monitor is not None)
+            self._save_preferences()
+            self._set_routing_controls_enabled(False)
+            self._show_running_state()
+            self._show_error(
+                "Não foi possível alterar o retorno. A rota anterior foi "
+                f"restaurada.\n\n{exc}"
+            )
+            return
+
+        self._set_routing_controls_enabled(False)
+        self._show_running_state()
 
     def _on_settings_changed(self, event: wx.Event) -> None:
         try:
@@ -292,16 +379,7 @@ class MainFrame(wx.Frame):
             return
 
         try:
-            self.engine.update_settings(self._current_settings())
-            self.engine.start(
-                self.input_choice.GetStringSelection(),
-                self.output_choice.GetStringSelection(),
-                (
-                    self.monitor_choice.GetStringSelection()
-                    if self.monitor_checkbox.GetValue()
-                    else None
-                ),
-            )
+            self._start_selected_route()
         except Exception as exc:
             self._show_error(str(exc))
             return
@@ -309,15 +387,10 @@ class MainFrame(wx.Frame):
         self._save_preferences()
         self._set_routing_controls_enabled(False)
         self.toggle_button.SetLabel("Des&ativar mesa")
-        self.status.ChangeValue(
-            "Mesa ativa. O áudio está sendo enviado para a saída virtual"
-            + (" e para o retorno." if self.monitor_checkbox.GetValue() else ".")
-        )
-        self.SetStatusText(
-            "Mesa ativa com reverb."
-            if self.reverb_checkbox.GetValue()
-            else "Mesa ativa sem reverb."
-        )
+        self._show_running_state()
+
+    def _on_exit(self, _event: wx.Event) -> None:
+        self.Close()
 
     def _on_audio_error(self, message: str) -> None:
         wx.CallAfter(self._handle_audio_error, message)

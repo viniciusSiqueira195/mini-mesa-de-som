@@ -33,6 +33,9 @@ desligá-lo, a voz limpa continua sendo enviada normalmente para a saída virtua
 Isso permite acrescentar outros efeitos independentes no futuro sem interromper
 todo o fluxo de áudio.
 
+O botão **Desativar mesa** interrompe somente a transmissão de áudio e mantém a
+janela aberta. Use **Encerrar programa** para parar o áudio e fechar a Mini Mesa.
+
 ## Preferências
 
 A Mini Mesa guarda automaticamente em JSON o microfone, a saída virtual, o
@@ -48,6 +51,10 @@ Marque **Ouvir retorno** e escolha o fone ou dispositivo em que deseja escutar
 a voz processada. A saída virtual continua alimentando o Discord, TeamTalk ou
 WhatsApp ao mesmo tempo. Use preferencialmente fones; retornar o microfone para
 caixas de som pode provocar microfonia.
+
+Os controles de retorno permanecem disponíveis enquanto a mesa está ativa.
+Marcar, desmarcar ou escolher outro dispositivo reconfigura automaticamente o
+fluxo de áudio, com uma breve interrupção enquanto os dispositivos são reabertos.
 
 O retorno usa preferencialmente WASAPI compartilhado. Saídas exclusivas WDM-KS
 não são oferecidas para monitoramento, pois muitos drivers não permitem que elas
@@ -99,6 +106,7 @@ mini-mesa
 - `Alt+E`: ativar ou desativar somente o efeito de reverb.
 - `Alt+R`: ajustar o nível de reverb.
 - `Alt+A`: ativar ou desativar a mesa.
+- `Alt+C`: encerrar o programa.
 - `F5`: atualizar a lista de dispositivos.
 
 ## Testes
