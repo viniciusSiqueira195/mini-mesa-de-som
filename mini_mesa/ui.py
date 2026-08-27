@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import wx
 import wx.adv
 
@@ -232,6 +234,35 @@ class MainFrame(wx.Frame):
         self._refresh_devices()
         self.Centre()
         self.input_choice.SetFocus()
+        if not self.preferences.welcome_shown:
+            wx.CallAfter(self._show_welcome)
+
+    def _show_welcome(self) -> None:
+        if self.IsBeingDeleted() or self.preferences.welcome_shown:
+            return
+        wx.MessageBox(
+            "Bem-vindo à Mini Mesa de Som!\n\n"
+            "Este programa recebe o áudio do seu microfone, aplica efeitos em "
+            "tempo real e envia o resultado para um cabo de áudio virtual. "
+            "Assim, você pode usar reverb no TeamTalk, Discord, WhatsApp ou em "
+            "outro aplicativo de conversa.\n\n"
+            "Para começar:\n"
+            "1. Escolha seu microfone físico.\n"
+            "2. Escolha o CABLE Input como saída virtual.\n"
+            "3. No aplicativo de conversa, escolha CABLE Output como microfone.\n"
+            "4. Ajuste os efeitos e pressione Ativar mesa.\n\n"
+            "Para ouvir sua própria voz, marque Ouvir retorno e use fones de "
+            "ouvido para evitar microfonia. Todos os controles podem ser "
+            "operados pelo teclado e são compatíveis com leitores de tela.",
+            "Bem-vindo à Mini Mesa de Som",
+            wx.OK | wx.ICON_INFORMATION,
+            self,
+        )
+        self.preferences = replace(self._current_preferences(), welcome_shown=True)
+        try:
+            self.preferences_store.save(self.preferences)
+        except OSError as exc:
+            self.SetStatusText(f"Não foi possível salvar as preferências: {exc}")
 
     def _on_refresh(self, _event: wx.Event) -> None:
         self._refresh_devices()
@@ -347,6 +378,7 @@ class MainFrame(wx.Frame):
 
     def _current_preferences(self) -> AppPreferences:
         return AppPreferences(
+            welcome_shown=self.preferences.welcome_shown,
             input_device=self.input_choice.GetStringSelection(),
             output_device=self.output_choice.GetStringSelection(),
             monitor_enabled=self.monitor_checkbox.GetValue(),

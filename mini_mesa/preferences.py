@@ -19,6 +19,7 @@ def default_preferences_path() -> Path:
 
 @dataclass(frozen=True, slots=True)
 class AppPreferences:
+    welcome_shown: bool = False
     input_device: str = ""
     output_device: str = ""
     monitor_enabled: bool = False
@@ -57,6 +58,7 @@ class AppPreferences:
             spatial_angle = defaults.spatial_angle
 
         return cls(
+            welcome_shown=bool_value("welcome_shown", defaults.welcome_shown),
             input_device=text_value("input_device", defaults.input_device),
             output_device=text_value("output_device", defaults.output_device),
             monitor_enabled=bool_value(
@@ -90,7 +92,7 @@ class PreferencesStore:
         try:
             with temporary_path.open("w", encoding="utf-8", newline="\n") as output:
                 json.dump(
-                    {"schema_version": 3, **asdict(preferences)},
+                    {"schema_version": 4, **asdict(preferences)},
                     output,
                     ensure_ascii=False,
                     indent=2,

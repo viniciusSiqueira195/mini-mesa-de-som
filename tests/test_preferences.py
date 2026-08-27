@@ -14,6 +14,7 @@ class PreferencesStoreTests(unittest.TestCase):
             path = Path(directory) / "preferences.json"
             store = PreferencesStore(path)
             expected = AppPreferences(
+                welcome_shown=True,
                 input_device="Microfone Áudio",
                 output_device="CABLE Input",
                 monitor_enabled=True,
@@ -29,7 +30,7 @@ class PreferencesStoreTests(unittest.TestCase):
 
             self.assertEqual(store.load(), expected)
             saved = json.loads(path.read_text(encoding="utf-8"))
-            self.assertEqual(saved["schema_version"], 3)
+            self.assertEqual(saved["schema_version"], 4)
             self.assertEqual(saved["input_device"], "Microfone Áudio")
 
     def test_invalid_file_falls_back_to_defaults(self) -> None:
@@ -43,6 +44,7 @@ class PreferencesStoreTests(unittest.TestCase):
         preferences = AppPreferences.from_dict(
             {
                 "input_device": "Zeus X",
+                "welcome_shown": "talvez",
                 "monitor_enabled": "sim",
                 "reverb_enabled": False,
                 "reverb_level": 500,
@@ -53,6 +55,7 @@ class PreferencesStoreTests(unittest.TestCase):
         )
 
         self.assertEqual(preferences.input_device, "Zeus X")
+        self.assertFalse(preferences.welcome_shown)
         self.assertFalse(preferences.monitor_enabled)
         self.assertFalse(preferences.reverb_enabled)
         self.assertEqual(preferences.reverb_level, 25)
