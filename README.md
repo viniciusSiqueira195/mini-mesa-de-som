@@ -9,6 +9,16 @@ um cabo de áudio virtual usado pelo Discord, TeamTalk, WhatsApp ou outro progra
 > o instalador Windows já são utilizáveis, mas a versão ainda precisa de testes
 > em diferentes computadores e interfaces de áudio.
 
+## Instalação rápida
+
+Baixe `MiniMesaDeSom-Setup-0.1.0.exe` na página da
+[versão mais recente](https://github.com/viniciusSiqueira195/mini-mesa-de-som/releases/latest)
+e execute o instalador. Ele pode instalar opcionalmente o VB-CABLE oficial,
+necessário para enviar o áudio processado ao TeamTalk, Discord ou outro programa.
+
+Na primeira abertura, uma mensagem acessível explica o fluxo básico e como
+configurar as duas pontas do cabo virtual.
+
 ## Por que este projeto existe
 
 Mesas virtuais populares costumam usar interfaces visuais difíceis ou
@@ -34,6 +44,9 @@ entradas reconhecidas pelo Windows podem ser selecionadas diretamente.
 - Preferências persistentes em JSON com recuperação de configuração inválida.
 - Buffer limitado, margem de volume e suavização de descontinuidades para evitar
   atraso crescente, saturação e estalos.
+- Retorno com margem adicional de volume e proteção final contra picos.
+- Compensação gradual da diferença de relógio entre microfone, cabo virtual e
+  dispositivo de retorno, evitando cortes depois de longos períodos de uso.
 
 ## Fluxo do áudio
 
@@ -207,6 +220,9 @@ não aceitam captura, cabo virtual e monitoramento simultâneos.
 Com retorno, a mesa começa com blocos de 256 amostras; sem retorno, usa 512. Dois
 blocos são preparados antes das saídas começarem. O buffer permanece limitado e
 suaviza faltas ou descartes de áudio para evitar estalos e atraso crescente.
+Como cada dispositivo físico possui seu próprio relógio, a mesa também estica ou
+encurta blocos isolados em uma única amostra para impedir que essa pequena deriva
+acumulada cause estouros ou esvaziamentos do buffer depois de alguns minutos.
 
 ## Testes
 
@@ -234,6 +250,12 @@ microfones físicos.
 - Medidor de nível acessível.
 - Assinatura digital do executável e do instalador.
 - Testes do instalador em máquinas limpas.
+
+## Licença
+
+O código da Mini Mesa de Som é distribuído sob a licença MIT. Dependências,
+dados HRTF e o VB-CABLE permanecem sujeitos às licenças de seus respectivos
+autores. Consulte [LICENSE](LICENSE) e os avisos incluídos no projeto.
 
 ## Créditos técnicos
 

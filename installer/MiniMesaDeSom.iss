@@ -1,6 +1,6 @@
 #define AppName "Mini Mesa de Som"
 #define AppVersion "0.1.0"
-#define AppPublisher "Projeto Mini Mesa de Som"
+#define AppPublisher "Vinicius Siqueira"
 #define AppURL "https://github.com/viniciusSiqueira195/mini-mesa-de-som"
 #define AppExeName "MiniMesaDeSom.exe"
 
@@ -12,6 +12,11 @@ AppPublisher={#AppPublisher}
 AppPublisherURL={#AppURL}
 AppSupportURL={#AppURL}
 AppUpdatesURL={#AppURL}
+VersionInfoVersion=0.1.0.0
+VersionInfoCompany={#AppPublisher}
+VersionInfoDescription=Mesa de som virtual acessível com efeitos em tempo real
+VersionInfoProductName={#AppName}
+VersionInfoProductVersion={#AppVersion}
 DefaultDirName={localappdata}\Programs\Mini Mesa de Som
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
@@ -38,6 +43,7 @@ Name: "vbcable"; Description: "Instalar o VB-CABLE oficial (recomendado)"; Group
 Source: "..\dist\MiniMesaDeSom\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "VB-CABLE-NOTICE.txt"; DestDir: "{app}\licenses"; Flags: ignoreversion
 Source: "AudioDeviceCmdlets-NOTICE.txt"; DestDir: "{app}\licenses"; Flags: ignoreversion
+Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "install_vbcable.ps1"; DestDir: "{tmp}"; Flags: deleteafterinstall; Tasks: vbcable
 Source: "..\.installer-dependencies\vbcable\*"; DestDir: "{tmp}\vbcable"; Flags: ignoreversion recursesubdirs createallsubdirs deleteafterinstall; Tasks: vbcable
 Source: "..\.installer-dependencies\AudioDeviceCmdlets\AudioDeviceCmdlets.psd1"; DestDir: "{tmp}\AudioDeviceCmdlets"; Flags: ignoreversion deleteafterinstall; Tasks: vbcable
