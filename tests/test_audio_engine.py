@@ -9,8 +9,11 @@ from mini_mesa.audio_engine import (
     AudioEngine,
     PedalboardBackend,
     _BufferedAudioOutput,
+    _HOST_API_RANKS,
+    _MONITOR_API_RANKS,
     _MultiOutputSoundDeviceStream,
     _normalize_device_label,
+    _normalize_output_device_label,
 )
 from mini_mesa.settings import ReverbSettings, SpatialSettings
 
@@ -94,6 +97,9 @@ class FakeSoundDevice:
 
     def OutputStream(self, **kwargs) -> FakeOutputStream:
         self.output_arguments = kwargs
+        return FakeOutputStream()
+
+    def InputStream(self, **_kwargs) -> FakeOutputStream:
         return FakeOutputStream()
 
 
@@ -202,6 +208,7 @@ class BufferedAudioOutputTests(unittest.TestCase):
             output_channels=2,
             block_size=2,
             gain=0.72,
+            peak_limit=0.95,
         )
         output._underrun = False
         output.push(np.array([[1.0, -1.0], [2.0, -2.0]], dtype=np.float32))
@@ -214,79 +221,90 @@ class BufferedAudioOutputTests(unittest.TestCase):
             np.array([[0.72, -0.72], [0.95, -0.95]], dtype=np.float32),
         )
 
-    def test_stable_input_first_callback_phase_needs_no_clock_correction(self) -> None:
-        block_size = 32
+    def test_primary_output_preserves_the_processed_signal(self) -> None:
         output = _BufferedAudioOutput(
             sounddevice=FakeSoundDevice(),
             output_id=7,
             sample_rate=48_000,
             output_channels=2,
-            block_size=block_size,
+            block_size=2,
         )
-        block = np.zeros(block_size, dtype=np.float32)
-        output.push(block)
-        output.push(block)
         output._underrun = False
+        output.push(np.array([1.2, -1.2], dtype=np.float32))
+        destination = np.zeros((2, 2), dtype=np.float32)
 
-        for _cycle in range(1_000):
-            output.push(block)
-            output._on_output(
-                np.zeros((block_size, 2)), block_size, None, None
-            )
+        output._on_output(destination, 2, None, None)
 
-        self.assertIsNotNone(output._clock_reference_frames)
-        self.assertEqual(output._clock_adjustment_count, 0)
-        self.assertEqual(output._dropped_block_count, 0)
-        self.assertEqual(output._underrun_count, 0)
+        np.testing.assert_array_equal(
+            destination,
+            np.array([[1.2, 1.2], [-1.2, -1.2]], dtype=np.float32),
+        )
 
-    def test_slow_output_clock_is_compensated_without_dropping_blocks(self) -> None:
-        block_size = 32
+    def test_experimental_monitor_drops_instead_of_blocking_when_busy(self) -> None:
         output = _BufferedAudioOutput(
             sounddevice=FakeSoundDevice(),
             output_id=7,
             sample_rate=48_000,
             output_channels=2,
-            block_size=block_size,
+            block_size=2,
+            drop_when_busy=True,
         )
-        block = np.linspace(-0.25, 0.25, block_size, dtype=np.float32)
-        output.push(block)
-        output.push(block)
-        output._on_output(np.zeros((block_size, 2)), block_size, None, None)
+        output._queue_lock.acquire()
+        try:
+            accepted = output.push(np.array([0.25, -0.25], dtype=np.float32))
+        finally:
+            output._queue_lock.release()
 
-        for cycle in range(4_000):
-            output.push(block)
-            frames = block_size - 1 if cycle % 16 == 0 else block_size
-            output._on_output(np.zeros((frames, 2)), frames, None, None)
-
-        self.assertGreater(output._clock_adjustment_count, 0)
-        self.assertEqual(output._dropped_block_count, 0)
-        self.assertLess(output._queued_frames, output._max_queued_frames)
-
-    def test_fast_output_clock_is_compensated_without_underruns(self) -> None:
-        block_size = 32
-        output = _BufferedAudioOutput(
-            sounddevice=FakeSoundDevice(),
-            output_id=7,
-            sample_rate=48_000,
-            output_channels=2,
-            block_size=block_size,
-        )
-        block = np.linspace(-0.25, 0.25, block_size, dtype=np.float32)
-        output.push(block)
-        output.push(block)
-        output._on_output(np.zeros((block_size, 2)), block_size, None, None)
-
-        for cycle in range(4_000):
-            output.push(block)
-            frames = block_size + 1 if cycle % 16 == 0 else block_size
-            output._on_output(np.zeros((frames, 2)), frames, None, None)
-
-        self.assertGreater(output._clock_adjustment_count, 0)
-        self.assertEqual(output._underrun_count, 0)
-        self.assertGreater(output._queued_frames, 0)
-
+        self.assertFalse(accepted)
+        self.assertEqual(output._queued_frames, 0)
+        self.assertEqual(output._dropped_block_count, 1)
 
 class MultiOutputStreamTests(unittest.TestCase):
+    def test_only_monitor_output_receives_monitor_protections(self) -> None:
+        stream = _MultiOutputSoundDeviceStream(
+            sounddevice=FakeSoundDevice(),
+            input_id=1,
+            outputs=[(2, 2), (3, 2)],
+            sample_rate=48_000,
+            input_channels=1,
+            block_size=256,
+            processor=lambda samples, _frames: samples,
+        )
+
+        primary, monitor = stream._outputs
+        self.assertEqual(primary._gain, 1.0)
+        self.assertIsNone(primary._peak_limit)
+        self.assertEqual(monitor._gain, 0.72)
+        self.assertEqual(monitor._peak_limit, 0.95)
+        self.assertFalse(primary._drop_when_busy)
+        self.assertTrue(monitor._drop_when_busy)
+        self.assertEqual(stream._prefill_blocks, 3)
+        self.assertEqual(stream._sd.output_arguments["blocksize"], 0)
+        self.assertEqual(stream._sd.output_arguments["latency"], 0.02)
+        stream.close()
+
+    def test_busy_monitor_cannot_delay_or_drop_the_recording_block(self) -> None:
+        stream = _MultiOutputSoundDeviceStream(
+            sounddevice=FakeSoundDevice(),
+            input_id=1,
+            outputs=[(2, 2), (3, 2)],
+            sample_rate=48_000,
+            input_channels=1,
+            block_size=4,
+            processor=lambda samples, _frames: samples,
+        )
+        primary, monitor = stream._outputs
+        monitor._queue_lock.acquire()
+        try:
+            stream._on_input(np.ones((4, 1), dtype=np.float32), 4, None, None)
+        finally:
+            monitor._queue_lock.release()
+
+        self.assertEqual(primary._queued_frames, 4)
+        self.assertEqual(monitor._queued_frames, 0)
+        self.assertEqual(monitor._dropped_block_count, 1)
+        stream.close()
+
     def test_removing_monitor_closes_only_the_monitor_output(self) -> None:
         primary = _BufferedAudioOutput(
             sounddevice=FakeSoundDevice(),
@@ -347,6 +365,20 @@ class PedalboardProcessingTests(unittest.TestCase):
 
 
 class AudioEngineTests(unittest.TestCase):
+    def test_primary_and_experimental_monitor_use_independent_api_priorities(self) -> None:
+        self.assertLess(
+            _HOST_API_RANKS["Windows WDM-KS"],
+            _HOST_API_RANKS["Windows WASAPI"],
+        )
+        self.assertEqual(_MONITOR_API_RANKS["Windows WASAPI"], 0)
+        self.assertNotIn("Windows WDM-KS", _MONITOR_API_RANKS)
+
+    def test_virtual_audio_cable_output_names_are_grouped_across_apis(self) -> None:
+        self.assertEqual(
+            _normalize_output_device_label("Line Out (Virtual Cable 1)"),
+            "Line 1 (Virtual Audio Cable)",
+        )
+
     def test_windows_instance_prefixes_do_not_duplicate_the_same_microphone(self) -> None:
         self.assertEqual(
             _normalize_device_label("Microfone (5- USB Audio Device)"),

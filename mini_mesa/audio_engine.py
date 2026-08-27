@@ -24,6 +24,7 @@ _MONITOR_API_RANKS = {
     "MME": 2,
 }
 _DEVICE_INSTANCE_PREFIX = re.compile(r"\((?:\d+\s*-\s*)")
+_VAC_LINE_OUT = re.compile(r"^Line Out \(Virtual Cable (\d+)\)$", re.IGNORECASE)
 
 
 def _normalize_device_label(label: str) -> str:
@@ -31,6 +32,16 @@ def _normalize_device_label(label: str) -> str:
 
     compact = " ".join(label.split())
     return _DEVICE_INSTANCE_PREFIX.sub("(", compact)
+
+
+def _normalize_output_device_label(label: str) -> str:
+    """Group the WDM-KS and WASAPI names of Virtual Audio Cable outputs."""
+
+    normalized = _normalize_device_label(label)
+    match = _VAC_LINE_OUT.fullmatch(normalized)
+    if match is not None:
+        return f"Line {match.group(1)} (Virtual Audio Cable)"
+    return normalized
 
 
 class AudioDependencyError(RuntimeError):
@@ -136,7 +147,8 @@ class PedalboardBackend:
             if device["max_input_channels"] > 0:
                 input_ids.setdefault(label, []).append((device_id, host_name))
             if device["max_output_channels"] > 0:
-                output_ids.setdefault(label, []).append((device_id, host_name))
+                output_label = _normalize_output_device_label(device["name"])
+                output_ids.setdefault(output_label, []).append((device_id, host_name))
 
         for candidates in (*input_ids.values(), *output_ids.values()):
             candidates.sort(key=lambda candidate: _HOST_API_RANKS.get(candidate[1], 99))
@@ -442,22 +454,21 @@ class _BufferedAudioOutput:
         output_channels: int,
         block_size: int,
         gain: float = 1.0,
+        peak_limit: float | None = None,
+        drop_when_busy: bool = False,
+        host_managed_blocksize: bool = False,
+        latency: str | float = "low",
     ) -> None:
         self._sd = sounddevice
         self._block_size = block_size
         self._output_channels = output_channels
         self._gain = gain
+        self._peak_limit = peak_limit
+        self._drop_when_busy = drop_when_busy
         self._chunks = deque()
         self._head_offset = 0
         self._queued_frames = 0
         self._max_queued_frames = self._block_size * 4
-        self._target_queued_frames = self._block_size * 2
-        self._clock_reference_frames: float | None = None
-        self._clock_calibration_total = 0
-        self._clock_calibration_count = 0
-        self._queue_level_ema = 0.0
-        self._clock_sample_count = 0
-        self._clock_adjustment_count = 0
         self._queue_lock = threading.Lock()
         self._prefilled = threading.Event()
         self._last_sample = self._np_zeros(output_channels)
@@ -468,53 +479,21 @@ class _BufferedAudioOutput:
         self.stream = sounddevice.OutputStream(
             device=output_id,
             samplerate=sample_rate,
-            blocksize=self._block_size,
+            blocksize=0 if host_managed_blocksize else self._block_size,
             channels=output_channels,
             dtype="float32",
-            latency="low",
+            latency=latency,
             callback=self._on_output,
         )
 
-    def push(self, processed) -> None:
-        with self._queue_lock:
-            chunk = processed
-            if self._prefilled.is_set() and not self._underrun:
-                projected_frames = self._queued_frames + processed.shape[0]
-                if self._clock_reference_frames is None:
-                    self._clock_calibration_total += projected_frames
-                    self._clock_calibration_count += 1
-                    if self._clock_calibration_count >= 64:
-                        self._clock_reference_frames = (
-                            self._clock_calibration_total
-                            / self._clock_calibration_count
-                        )
-                        self._queue_level_ema = self._clock_reference_frames
-                else:
-                    self._queue_level_ema = (
-                        (self._queue_level_ema * 0.98) + (projected_frames * 0.02)
-                    )
-                    self._clock_sample_count += 1
-
-                if (
-                    self._clock_reference_frames is not None
-                    and self._clock_sample_count % 8 == 0
-                ):
-                    tolerance = max(2, int(self._block_size * 0.12))
-                    new_length = processed.shape[0]
-                    if self._queue_level_ema > (
-                        self._clock_reference_frames + tolerance
-                    ):
-                        new_length -= 1
-                    elif self._queue_level_ema < (
-                        self._clock_reference_frames - tolerance
-                    ):
-                        new_length += 1
-                    if new_length != processed.shape[0] and new_length >= 2:
-                        chunk = self._resample_chunk(processed, new_length)
-                        self._clock_adjustment_count += 1
-
-            self._chunks.append(chunk)
-            self._queued_frames += chunk.shape[0]
+    def push(self, processed) -> bool:
+        acquired = self._queue_lock.acquire(blocking=not self._drop_when_busy)
+        if not acquired:
+            self._dropped_block_count += 1
+            return False
+        try:
+            self._chunks.append(processed)
+            self._queued_frames += processed.shape[0]
             while self._queued_frames > self._max_queued_frames and self._chunks:
                 removed = self._chunks.popleft()
                 self._queued_frames -= removed.shape[0] - self._head_offset
@@ -523,18 +502,15 @@ class _BufferedAudioOutput:
                 self._dropped_block_count += 1
             if self._queued_frames >= self._block_size * 2:
                 self._prefilled.set()
+        finally:
+            self._queue_lock.release()
+        return True
 
     def clear(self) -> None:
         with self._queue_lock:
             self._chunks.clear()
             self._head_offset = 0
             self._queued_frames = 0
-            self._clock_reference_frames = None
-            self._clock_calibration_total = 0
-            self._clock_calibration_count = 0
-            self._queue_level_ema = 0.0
-            self._clock_sample_count = 0
-            self._clock_adjustment_count = 0
             self._last_sample = self._np_zeros(self._output_channels)
             self._underrun = True
             self._needs_crossfade = False
@@ -595,35 +571,6 @@ class _BufferedAudioOutput:
 
         return np.zeros(channels, dtype=np.float32)
 
-    @staticmethod
-    def _resample_chunk(samples, new_length: int):
-        """Stretch one block by one frame to absorb independent device clocks."""
-
-        import numpy as np
-
-        source = np.asarray(samples, dtype=np.float32)
-        old_length = source.shape[0]
-        if old_length == new_length:
-            return source
-        if old_length == 1:
-            return np.repeat(source, new_length, axis=0)
-
-        old_positions = np.arange(old_length, dtype=np.float32)
-        new_positions = np.linspace(
-            0.0,
-            float(old_length - 1),
-            new_length,
-            dtype=np.float32,
-        )
-        if source.ndim == 1:
-            return np.interp(new_positions, old_positions, source).astype(np.float32)
-        return np.column_stack(
-            [
-                np.interp(new_positions, old_positions, source[:, channel])
-                for channel in range(source.shape[1])
-            ]
-        ).astype(np.float32)
-
     def _adapt_channels(self, samples):
         import numpy as np
 
@@ -638,7 +585,11 @@ class _BufferedAudioOutput:
             adapted = np.repeat(samples, self._output_channels, axis=1)
         else:
             adapted = samples[:, : self._output_channels]
-        return np.clip(adapted * self._gain, -0.95, 0.95)
+        if self._gain != 1.0:
+            adapted = adapted * self._gain
+        if self._peak_limit is not None:
+            adapted = np.clip(adapted, -self._peak_limit, self._peak_limit)
+        return adapted
 
 
 class _MultiOutputSoundDeviceStream:
@@ -662,7 +613,7 @@ class _MultiOutputSoundDeviceStream:
         self._stop_event = threading.Event()
         self._first_audio = threading.Event()
         self._captured_blocks = 0
-        self._prefill_blocks = 2
+        self._prefill_blocks = 3 if len(outputs) > 1 else 2
         self._error: Exception | None = None
         self._validating = False
         self._outputs: list[_BufferedAudioOutput] = []
@@ -688,6 +639,10 @@ class _MultiOutputSoundDeviceStream:
                         output_channels=output_channels,
                         block_size=block_size,
                         gain=1.0 if index == 0 else 0.72,
+                        peak_limit=None if index == 0 else 0.95,
+                        drop_when_busy=index > 0,
+                        host_managed_blocksize=index > 0,
+                        latency="low" if index == 0 else 0.02,
                     )
                 )
             self._primary_output = self._outputs[0]
@@ -744,13 +699,17 @@ class _MultiOutputSoundDeviceStream:
             self._stop_event.set()
             raise self._sd.CallbackAbort
 
+        # The virtual cable is the recording path and always receives the block
+        # first. A congested experimental monitor is allowed to drop its copy,
+        # but can never hold up the input callback or the primary output.
+        self._primary_output.push(processed)
         with self._outputs_lock:
-            outputs = tuple(self._outputs)
+            monitor = self._monitor_output
             pending_monitor = self._pending_monitor
+        if monitor is not None:
+            monitor.push(processed)
         if pending_monitor is not None:
-            outputs = (*outputs, pending_monitor)
-        for output in outputs:
-            output.push(processed)
+            pending_monitor.push(processed)
         self._captured_blocks += 1
         if self._captured_blocks >= self._prefill_blocks:
             self._first_audio.set()
@@ -773,6 +732,10 @@ class _MultiOutputSoundDeviceStream:
             output_channels=output_channels,
             block_size=self._block_size,
             gain=0.72,
+            peak_limit=0.95,
+            drop_when_busy=True,
+            host_managed_blocksize=True,
+            latency=0.02,
         )
         with self._outputs_lock:
             if self._pending_monitor is not None:

@@ -6,6 +6,15 @@ param(
 $ErrorActionPreference = "Stop"
 $projectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 $python = Join-Path $projectRoot ".venv\Scripts\python.exe"
+$installerScript = Join-Path $projectRoot "installer\MiniMesaDeSom.iss"
+$versionMatch = [regex]::Match(
+    (Get-Content -LiteralPath $installerScript -Raw),
+    '#define AppVersion "([^"]+)"'
+)
+if (-not $versionMatch.Success) {
+    throw "Não foi possível ler a versão do instalador."
+}
+$appVersion = $versionMatch.Groups[1].Value
 
 if (-not (Test-Path -LiteralPath $python)) {
     throw "Ambiente virtual não encontrado. Crie .venv e instale o extra de build."
@@ -45,9 +54,15 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "O Inno Setup não conseguiu gerar o instalador."
     }
+
+    $installerPath = Join-Path $projectRoot "installer-output\MiniMesaDeSom-Setup-$appVersion.exe"
+    $checksumPath = "$installerPath.sha256"
+    $checksum = (Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    "$checksum *$(Split-Path -Leaf $installerPath)" |
+        Set-Content -LiteralPath $checksumPath -Encoding ascii
 }
 finally {
     Pop-Location
 }
 
-Write-Host "Instalador gerado em installer-output."
+Write-Host "Instalador e assinatura SHA-256 gerados em installer-output."

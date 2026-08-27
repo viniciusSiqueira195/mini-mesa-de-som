@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from dataclasses import replace
 
 import wx
@@ -8,6 +9,15 @@ import wx.adv
 from .audio_engine import AudioDependencyError, AudioEngine
 from .preferences import AppPreferences, PreferencesStore
 from .settings import ReverbSettings, SpatialSettings
+from .updater import (
+    UpdateCancelled,
+    UpdateError,
+    UpdateInfo,
+    can_self_update,
+    check_for_update,
+    download_installer,
+    launch_installer,
+)
 
 
 class SystemTrayIcon(wx.adv.TaskBarIcon):
@@ -70,6 +80,9 @@ class MainFrame(wx.Frame):
         self._tray_icon: SystemTrayIcon | None = None
         self._last_focused_control: wx.Window | None = None
         self._tray_notification_shown = False
+        self._update_check_in_progress = False
+        self._update_progress_dialog: wx.ProgressDialog | None = None
+        self._update_cancel_event: threading.Event | None = None
 
         panel = wx.Panel(self)
         root = wx.BoxSizer(wx.VERTICAL)
@@ -223,9 +236,21 @@ class MainFrame(wx.Frame):
         self.CreateStatusBar()
         self.SetStatusText("F5 atualiza a lista de dispositivos.")
 
+        menu_bar = wx.MenuBar()
+        help_menu = wx.Menu()
+        self._check_updates_id = wx.NewIdRef()
+        help_menu.Append(self._check_updates_id, "Verificar &atualizações")
+        menu_bar.Append(help_menu, "A&juda")
+        self.SetMenuBar(menu_bar)
+
         accelerator = wx.AcceleratorTable([(wx.ACCEL_NORMAL, wx.WXK_F5, wx.ID_REFRESH)])
         self.SetAcceleratorTable(accelerator)
         self.Bind(wx.EVT_MENU, self._on_refresh, id=wx.ID_REFRESH)
+        self.Bind(
+            wx.EVT_MENU,
+            self._on_check_for_updates,
+            id=self._check_updates_id,
+        )
         self.Bind(wx.EVT_ICONIZE, self._on_iconize)
         self.Bind(wx.EVT_CLOSE, self._on_close)
 
@@ -236,6 +261,185 @@ class MainFrame(wx.Frame):
         self.input_choice.SetFocus()
         if not self.preferences.welcome_shown:
             wx.CallAfter(self._show_welcome)
+        if can_self_update():
+            wx.CallLater(3000, self._start_update_check, False)
+
+    def _on_check_for_updates(self, _event: wx.Event) -> None:
+        self._start_update_check(True)
+
+    def _start_update_check(self, manual: bool) -> None:
+        if self._update_check_in_progress:
+            if manual:
+                wx.MessageBox(
+                    "A verificação já está em andamento.",
+                    "Atualizações",
+                    wx.OK | wx.ICON_INFORMATION,
+                    self,
+                )
+            return
+        self._update_check_in_progress = True
+        if manual:
+            self.SetStatusText("Verificando atualizações...")
+        threading.Thread(
+            target=self._update_check_worker,
+            args=(manual,),
+            name="mini-mesa-update-check",
+            daemon=True,
+        ).start()
+
+    def _update_check_worker(self, manual: bool) -> None:
+        try:
+            update = check_for_update()
+        except UpdateError as exc:
+            wx.CallAfter(self._finish_update_check, manual, None, str(exc))
+            return
+        except Exception:
+            wx.CallAfter(
+                self._finish_update_check,
+                manual,
+                None,
+                "Não foi possível verificar as atualizações.",
+            )
+            return
+        wx.CallAfter(self._finish_update_check, manual, update, "")
+
+    def _finish_update_check(
+        self,
+        manual: bool,
+        update: UpdateInfo | None,
+        error_message: str,
+    ) -> None:
+        self._update_check_in_progress = False
+        if self.IsBeingDeleted():
+            return
+        if error_message:
+            if manual:
+                wx.MessageBox(
+                    error_message,
+                    "Atualizações",
+                    wx.OK | wx.ICON_ERROR,
+                    self,
+                )
+                self.SetStatusText("Não foi possível verificar atualizações.")
+            return
+        if update is None:
+            if manual:
+                wx.MessageBox(
+                    "Você já está usando a versão mais recente.",
+                    "Atualizações",
+                    wx.OK | wx.ICON_INFORMATION,
+                    self,
+                )
+            self.SetStatusText("A Mini Mesa está atualizada.")
+            return
+
+        notes = update.release_notes.strip() or "Consulte as notas da release no GitHub."
+        if len(notes) > 1200:
+            notes = notes[:1200].rstrip() + "..."
+        answer = wx.MessageBox(
+            f"A versão {update.latest_version} está disponível.\n\n"
+            f"Versão instalada: {update.current_version}.\n\n"
+            f"Novidades:\n{notes}\n\n"
+            "Deseja baixar e instalar agora?",
+            "Atualização disponível",
+            wx.YES_NO | wx.NO_DEFAULT | wx.ICON_INFORMATION,
+            self,
+        )
+        if answer == wx.YES:
+            self._start_update_download(update)
+
+    def _start_update_download(self, update: UpdateInfo) -> None:
+        self._update_cancel_event = threading.Event()
+        self._update_progress_dialog = wx.ProgressDialog(
+            "Baixando atualização",
+            f"Preparando a versão {update.latest_version}...",
+            maximum=1000,
+            parent=self,
+            style=wx.PD_APP_MODAL | wx.PD_CAN_ABORT | wx.PD_ELAPSED_TIME,
+        )
+        threading.Thread(
+            target=self._update_download_worker,
+            args=(update,),
+            name="mini-mesa-update-download",
+            daemon=True,
+        ).start()
+
+    def _update_download_worker(self, update: UpdateInfo) -> None:
+        try:
+            installer = download_installer(
+                update,
+                progress_callback=lambda downloaded, total: wx.CallAfter(
+                    self._apply_update_progress,
+                    downloaded,
+                    total,
+                ),
+                cancel_event=self._update_cancel_event,
+            )
+        except UpdateCancelled:
+            wx.CallAfter(self._finish_update_download, None, "")
+            return
+        except UpdateError as exc:
+            wx.CallAfter(self._finish_update_download, None, str(exc))
+            return
+        except Exception:
+            wx.CallAfter(
+                self._finish_update_download,
+                None,
+                "Não foi possível baixar a atualização.",
+            )
+            return
+        wx.CallAfter(self._finish_update_download, installer, "")
+
+    def _apply_update_progress(self, downloaded: int, total: int) -> None:
+        dialog = self._update_progress_dialog
+        if dialog is None:
+            return
+        if total > 0:
+            value = max(0, min(1000, int(downloaded * 1000 / total)))
+            message = (
+                f"Baixando atualização: {downloaded / 1048576:.1f} de "
+                f"{total / 1048576:.1f} MB."
+            )
+            keep_going, _skip = dialog.Update(value, message)
+        else:
+            keep_going, _skip = dialog.Pulse(
+                f"Baixando atualização: {downloaded / 1048576:.1f} MB."
+            )
+        if not keep_going and self._update_cancel_event is not None:
+            self._update_cancel_event.set()
+
+    def _finish_update_download(
+        self,
+        installer,
+        error_message: str,
+    ) -> None:
+        dialog = self._update_progress_dialog
+        self._update_progress_dialog = None
+        self._update_cancel_event = None
+        if dialog is not None:
+            dialog.Destroy()
+        if self.IsBeingDeleted():
+            return
+        if error_message:
+            wx.MessageBox(
+                error_message,
+                "Atualizações",
+                wx.OK | wx.ICON_ERROR,
+                self,
+            )
+            return
+        if installer is None:
+            self.SetStatusText("Download da atualização cancelado.")
+            return
+        try:
+            self._save_preferences()
+            self.engine.stop()
+            launch_installer(installer)
+        except UpdateError as exc:
+            wx.MessageBox(str(exc), "Atualizações", wx.OK | wx.ICON_ERROR, self)
+            return
+        self.SetStatusText("Atualização baixada; instalando a nova versão...")
+        self.Close()
 
     def _show_welcome(self) -> None:
         if self.IsBeingDeleted() or self.preferences.welcome_shown:
@@ -252,8 +456,10 @@ class MainFrame(wx.Frame):
             "3. No aplicativo de conversa, escolha CABLE Output como microfone.\n"
             "4. Ajuste os efeitos e pressione Ativar mesa.\n\n"
             "Para ouvir sua própria voz, marque Ouvir retorno e use fones de "
-            "ouvido para evitar microfonia. Todos os controles podem ser "
-            "operados pelo teclado e são compatíveis com leitores de tela.",
+            "ouvido para evitar microfonia. Faça um teste de gravação no "
+            "aplicativo de conversa antes de entrar em uma chamada. Todos os "
+            "controles podem ser operados pelo teclado e são compatíveis com "
+            "leitores de tela.",
             "Bem-vindo à Mini Mesa de Som",
             wx.OK | wx.ICON_INFORMATION,
             self,
@@ -419,7 +625,7 @@ class MainFrame(wx.Frame):
             self._update_running_monitor(previous_monitor)
             return
         self.SetStatusText(
-            "Retorno ativado; escolha onde deseja ouvir sua voz."
+            "Retorno experimental ativado; a saída virtual permanece isolada."
             if enabled
             else "Retorno desativado."
         )
@@ -445,7 +651,7 @@ class MainFrame(wx.Frame):
             return None
         return self.preferences.monitor_device or None
 
-    def _start_route(self, monitor_output: str | None) -> None:
+    def _start_selected_route(self) -> None:
         self.engine.update_noise_reduction(
             self.noise_reduction_checkbox.GetValue()
         )
@@ -454,11 +660,8 @@ class MainFrame(wx.Frame):
         self.engine.start(
             self.input_choice.GetStringSelection(),
             self.output_choice.GetStringSelection(),
-            monitor_output,
+            self._selected_monitor_output(),
         )
-
-    def _start_selected_route(self) -> None:
-        self._start_route(self._selected_monitor_output())
 
     def _show_running_state(self) -> None:
         monitoring = self.monitor_checkbox.GetValue()
@@ -474,7 +677,7 @@ class MainFrame(wx.Frame):
         effect_description = " e ".join(effects) if effects else "nenhum efeito"
         self.status.ChangeValue(
             "Mesa ativa. O áudio está sendo enviado para a saída virtual"
-            + (" e para o retorno." if monitoring else ".")
+            + (" e para o retorno experimental." if monitoring else ".")
             + f" Efeitos ativos: {effect_description}."
         )
         self.SetStatusText(
@@ -484,7 +687,7 @@ class MainFrame(wx.Frame):
         )
 
     def _update_running_monitor(self, previous_monitor: str | None) -> None:
-        self.SetStatusText("Atualizando a rota de retorno...")
+        self.SetStatusText("Atualizando a rota de retorno experimental...")
         try:
             self.engine.update_monitor(self._selected_monitor_output())
         except Exception as exc:

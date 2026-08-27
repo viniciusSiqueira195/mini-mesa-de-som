@@ -37,16 +37,17 @@ entradas reconhecidas pelo Windows podem ser selecionadas diretamente.
 - Redução neural de ruído RNNoise, opcional e executada localmente.
 - Áudio espacial binaural com HRTF real e posição horizontal de −180° a +180°.
 - Reverb e redução de ruído utilizáveis separadamente ou em conjunto.
-- Retorno da própria voz sem depender da opção “Escutar este dispositivo” do
-  Windows.
-- Troca do retorno enquanto a mesa está ativa sem interromper a saída virtual.
+- Retorno local experimental, mantido aberto para testes e contribuições.
 - Minimização para a bandeja do sistema sem interromper o áudio.
 - Preferências persistentes em JSON com recuperação de configuração inválida.
+- Verificação automática de novas versões pelo GitHub, com download acessível e
+  validação SHA-256 antes da instalação.
 - Buffer limitado, margem de volume e suavização de descontinuidades para evitar
   atraso crescente, saturação e estalos.
-- Retorno com margem adicional de volume e proteção final contra picos.
-- Compensação gradual da diferença de relógio entre microfone, cabo virtual e
-  dispositivo de retorno, evitando cortes depois de longos períodos de uso.
+- Preferência por WDM-KS para a rota principal, preservando o caminho estável
+  usado pelo instalador antigo.
+- Filas independentes: congestionamentos no retorno descartam somente a cópia
+  local e não bloqueiam o áudio enviado ao cabo virtual.
 
 ## Fluxo do áudio
 
@@ -60,15 +61,18 @@ Microfone físico
     -> Discord, TeamTalk, WhatsApp ou outro aplicativo
 ```
 
-Quando **Ouvir retorno** está marcado, o mesmo áudio processado também segue para
-o fone escolhido. Use fones de ouvido para evitar microfonia.
+Quando **Ouvir retorno** está marcado, uma cópia do áudio processado também
+segue para o fone escolhido. Use fones de ouvido para evitar microfonia. Esse
+retorno ainda é experimental e pode apresentar estalos em algumas combinações
+de dispositivos; a rota do cabo virtual permanece isolada para que isso não
+interrompa gravações e chamadas.
 
 ## Requisitos
 
 - Windows 10 ou 11.
 - Python 3.11 ou mais recente para desenvolvimento.
 - Um cabo de áudio virtual, como o VB-CABLE.
-- Fones de ouvido recomendados para usar o retorno.
+- Fones de ouvido recomendados para usar o retorno experimental.
 
 ## Instalação para desenvolvimento
 
@@ -129,6 +133,17 @@ oficiais do VB-CABLE e AudioDeviceCmdlets com verificação SHA-256 e gera
 uma pasta interna para dar mais estabilidade às bibliotecas nativas de áudio;
 para o usuário, a entrega continua sendo um único instalador.
 
+## Atualizações
+
+A versão instalada verifica em segundo plano a release estável mais recente no
+GitHub. Quando houver uma versão nova, um diálogo acessível permite baixar e
+instalar a atualização. O arquivo só é executado depois de sua assinatura
+SHA-256 ser comparada com a assinatura publicada junto da release.
+
+Também é possível iniciar a verificação manualmente em **Ajuda > Verificar
+atualizações**. O atualizador preserva as preferências e não reinstala o driver
+VB-CABLE durante atualizações comuns.
+
 ## Configuração do cabo virtual
 
 Com o VB-CABLE como exemplo:
@@ -180,13 +195,14 @@ enquanto a mesa está ativa.
 
 O resultado foi feito para audição em fones e precisa permanecer estéreo até o
 ouvinte. Aplicativos de conversa que transformem o microfone em mono eliminarão
-boa parte ou todo o efeito; use **Ouvir retorno** para avaliá-lo diretamente.
+boa parte ou todo o efeito. Faça uma gravação estéreo no aplicativo de destino
+para avaliá-lo ou use o retorno experimental.
 
 ## Atalhos
 
 - `Alt+M`: escolher o microfone.
 - `Alt+S`: escolher a saída virtual.
-- `Alt+O`: ativar ou desativar o retorno.
+- `Alt+O`: ativar ou desativar o retorno experimental.
 - `Alt+T`: escolher o dispositivo de retorno.
 - `Alt+E`: ativar ou desativar o reverb.
 - `Alt+R`: ajustar o nível de reverb.
@@ -196,6 +212,7 @@ boa parte ou todo o efeito; use **Ouvir retorno** para avaliá-lo diretamente.
 - `Alt+A`: ativar ou desativar a mesa.
 - `Alt+C`: encerrar o programa.
 - `F5`: atualizar os dispositivos.
+- `Alt+J`, depois `A`: abrir Ajuda e verificar atualizações.
 
 ## Preferências
 
@@ -205,7 +222,7 @@ As preferências são gravadas automaticamente em:
 %APPDATA%\Mini Mesa de Som Teste\preferences.json
 ```
 
-O arquivo inclui dispositivos, retorno e estados dos efeitos. A gravação usa um
+O arquivo inclui os dispositivos, o retorno e os estados dos efeitos. A gravação usa um
 arquivo temporário antes da substituição, reduzindo o risco de corrupção. Se o
 JSON estiver inválido ou um dispositivo desaparecer, a mesa usa valores seguros
 e seleciona uma alternativa disponível.
@@ -213,16 +230,17 @@ e seleciona uma alternativa disponível.
 ## Compatibilidade de áudio no Windows
 
 O Windows pode anunciar o mesmo dispositivo por várias APIs. A Mini Mesa agrupa
-nomes duplicados e tenta WDM-KS, WASAPI, DirectSound e MME conforme a finalidade
-da rota. O retorno prefere WASAPI compartilhado porque diversas saídas WDM-KS
-não aceitam captura, cabo virtual e monitoramento simultâneos.
+nomes duplicados e prioriza WDM-KS na rota entre o microfone e o cabo virtual,
+preservando o caminho que se mostrou estável no instalador anterior. WASAPI,
+DirectSound e MME permanecem como alternativas. O retorno físico é tratado
+separadamente e prefere WASAPI compartilhado.
 
-Com retorno, a mesa começa com blocos de 256 amostras; sem retorno, usa 512. Dois
-blocos são preparados antes das saídas começarem. O buffer permanece limitado e
-suaviza faltas ou descartes de áudio para evitar estalos e atraso crescente.
-Como cada dispositivo físico possui seu próprio relógio, a mesa também estica ou
-encurta blocos isolados em uma única amostra para impedir que essa pequena deriva
-acumulada cause estouros ou esvaziamentos do buffer depois de alguns minutos.
+O retorno local é experimental. Nos testes, abrir simultaneamente o cabo virtual
+e uma saída física ainda produziu estalos em algumas combinações de dispositivos
+com relógios independentes. Seu buffer é separado e não bloqueante: o cabo
+virtual recebe cada bloco primeiro e, se o retorno estiver congestionado, apenas
+a cópia local é descartada. Assim, o defeito conhecido permanece disponível para
+estudo sem atrasar a rota usada por gravações e aplicativos de conversa.
 
 ## Testes
 
@@ -231,7 +249,7 @@ python -m unittest discover -s tests -v
 ```
 
 A suíte valida configurações, preferências, ciclo do motor, continuidade dos
-buffers, roteamento dinâmico e integração do redutor de ruído sem acessar os
+buffers, isolamento entre retorno e gravação e integração do redutor de ruído sem acessar os
 microfones físicos.
 
 ## Arquitetura

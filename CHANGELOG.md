@@ -8,9 +8,10 @@ Primeira versão pública da Mini Mesa de Som.
 - Reverb em tempo real com controle simplificado.
 - Redução de ruído RNNoise opcional e local.
 - Áudio espacial binaural com HRTF MIT KEMAR.
-- Retorno de voz com troca dinâmica de dispositivo.
-- Compensação de deriva entre dispositivos para maior estabilidade do retorno.
+- Rota principal WDM-KS restaurada após comparação com o instalador anterior.
+- Retorno local experimental, com fila não bloqueante isolada da gravação.
 - Preferências persistentes e funcionamento na bandeja do sistema.
+- Atualizador integrado com consulta ao GitHub e validação SHA-256.
 - Instalador acessível para Windows com instalação opcional do VB-CABLE.
 - Diálogo de boas-vindas na primeira inicialização.
 
