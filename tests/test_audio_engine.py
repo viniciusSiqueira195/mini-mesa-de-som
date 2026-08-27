@@ -194,6 +194,97 @@ class BufferedAudioOutputTests(unittest.TestCase):
 
         np.testing.assert_allclose(destination[:, 0], np.array([0.5, -0.1]))
 
+    def test_monitor_gain_leaves_headroom_and_caps_unexpected_peaks(self) -> None:
+        output = _BufferedAudioOutput(
+            sounddevice=FakeSoundDevice(),
+            output_id=7,
+            sample_rate=48_000,
+            output_channels=2,
+            block_size=2,
+            gain=0.72,
+        )
+        output._underrun = False
+        output.push(np.array([[1.0, -1.0], [2.0, -2.0]], dtype=np.float32))
+        destination = np.zeros((2, 2), dtype=np.float32)
+
+        output._on_output(destination, 2, None, None)
+
+        np.testing.assert_allclose(
+            destination,
+            np.array([[0.72, -0.72], [0.95, -0.95]], dtype=np.float32),
+        )
+
+    def test_stable_input_first_callback_phase_needs_no_clock_correction(self) -> None:
+        block_size = 32
+        output = _BufferedAudioOutput(
+            sounddevice=FakeSoundDevice(),
+            output_id=7,
+            sample_rate=48_000,
+            output_channels=2,
+            block_size=block_size,
+        )
+        block = np.zeros(block_size, dtype=np.float32)
+        output.push(block)
+        output.push(block)
+        output._underrun = False
+
+        for _cycle in range(1_000):
+            output.push(block)
+            output._on_output(
+                np.zeros((block_size, 2)), block_size, None, None
+            )
+
+        self.assertIsNotNone(output._clock_reference_frames)
+        self.assertEqual(output._clock_adjustment_count, 0)
+        self.assertEqual(output._dropped_block_count, 0)
+        self.assertEqual(output._underrun_count, 0)
+
+    def test_slow_output_clock_is_compensated_without_dropping_blocks(self) -> None:
+        block_size = 32
+        output = _BufferedAudioOutput(
+            sounddevice=FakeSoundDevice(),
+            output_id=7,
+            sample_rate=48_000,
+            output_channels=2,
+            block_size=block_size,
+        )
+        block = np.linspace(-0.25, 0.25, block_size, dtype=np.float32)
+        output.push(block)
+        output.push(block)
+        output._on_output(np.zeros((block_size, 2)), block_size, None, None)
+
+        for cycle in range(4_000):
+            output.push(block)
+            frames = block_size - 1 if cycle % 16 == 0 else block_size
+            output._on_output(np.zeros((frames, 2)), frames, None, None)
+
+        self.assertGreater(output._clock_adjustment_count, 0)
+        self.assertEqual(output._dropped_block_count, 0)
+        self.assertLess(output._queued_frames, output._max_queued_frames)
+
+    def test_fast_output_clock_is_compensated_without_underruns(self) -> None:
+        block_size = 32
+        output = _BufferedAudioOutput(
+            sounddevice=FakeSoundDevice(),
+            output_id=7,
+            sample_rate=48_000,
+            output_channels=2,
+            block_size=block_size,
+        )
+        block = np.linspace(-0.25, 0.25, block_size, dtype=np.float32)
+        output.push(block)
+        output.push(block)
+        output._on_output(np.zeros((block_size, 2)), block_size, None, None)
+
+        for cycle in range(4_000):
+            output.push(block)
+            frames = block_size + 1 if cycle % 16 == 0 else block_size
+            output._on_output(np.zeros((frames, 2)), frames, None, None)
+
+        self.assertGreater(output._clock_adjustment_count, 0)
+        self.assertEqual(output._underrun_count, 0)
+        self.assertGreater(output._queued_frames, 0)
+
 
 class MultiOutputStreamTests(unittest.TestCase):
     def test_removing_monitor_closes_only_the_monitor_output(self) -> None:

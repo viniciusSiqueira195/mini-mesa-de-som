@@ -441,14 +441,23 @@ class _BufferedAudioOutput:
         sample_rate: float,
         output_channels: int,
         block_size: int,
+        gain: float = 1.0,
     ) -> None:
         self._sd = sounddevice
         self._block_size = block_size
         self._output_channels = output_channels
+        self._gain = gain
         self._chunks = deque()
         self._head_offset = 0
         self._queued_frames = 0
         self._max_queued_frames = self._block_size * 4
+        self._target_queued_frames = self._block_size * 2
+        self._clock_reference_frames: float | None = None
+        self._clock_calibration_total = 0
+        self._clock_calibration_count = 0
+        self._queue_level_ema = 0.0
+        self._clock_sample_count = 0
+        self._clock_adjustment_count = 0
         self._queue_lock = threading.Lock()
         self._prefilled = threading.Event()
         self._last_sample = self._np_zeros(output_channels)
@@ -468,8 +477,44 @@ class _BufferedAudioOutput:
 
     def push(self, processed) -> None:
         with self._queue_lock:
-            self._chunks.append(processed)
-            self._queued_frames += processed.shape[0]
+            chunk = processed
+            if self._prefilled.is_set() and not self._underrun:
+                projected_frames = self._queued_frames + processed.shape[0]
+                if self._clock_reference_frames is None:
+                    self._clock_calibration_total += projected_frames
+                    self._clock_calibration_count += 1
+                    if self._clock_calibration_count >= 64:
+                        self._clock_reference_frames = (
+                            self._clock_calibration_total
+                            / self._clock_calibration_count
+                        )
+                        self._queue_level_ema = self._clock_reference_frames
+                else:
+                    self._queue_level_ema = (
+                        (self._queue_level_ema * 0.98) + (projected_frames * 0.02)
+                    )
+                    self._clock_sample_count += 1
+
+                if (
+                    self._clock_reference_frames is not None
+                    and self._clock_sample_count % 8 == 0
+                ):
+                    tolerance = max(2, int(self._block_size * 0.12))
+                    new_length = processed.shape[0]
+                    if self._queue_level_ema > (
+                        self._clock_reference_frames + tolerance
+                    ):
+                        new_length -= 1
+                    elif self._queue_level_ema < (
+                        self._clock_reference_frames - tolerance
+                    ):
+                        new_length += 1
+                    if new_length != processed.shape[0] and new_length >= 2:
+                        chunk = self._resample_chunk(processed, new_length)
+                        self._clock_adjustment_count += 1
+
+            self._chunks.append(chunk)
+            self._queued_frames += chunk.shape[0]
             while self._queued_frames > self._max_queued_frames and self._chunks:
                 removed = self._chunks.popleft()
                 self._queued_frames -= removed.shape[0] - self._head_offset
@@ -484,6 +529,12 @@ class _BufferedAudioOutput:
             self._chunks.clear()
             self._head_offset = 0
             self._queued_frames = 0
+            self._clock_reference_frames = None
+            self._clock_calibration_total = 0
+            self._clock_calibration_count = 0
+            self._queue_level_ema = 0.0
+            self._clock_sample_count = 0
+            self._clock_adjustment_count = 0
             self._last_sample = self._np_zeros(self._output_channels)
             self._underrun = True
             self._needs_crossfade = False
@@ -544,19 +595,50 @@ class _BufferedAudioOutput:
 
         return np.zeros(channels, dtype=np.float32)
 
+    @staticmethod
+    def _resample_chunk(samples, new_length: int):
+        """Stretch one block by one frame to absorb independent device clocks."""
+
+        import numpy as np
+
+        source = np.asarray(samples, dtype=np.float32)
+        old_length = source.shape[0]
+        if old_length == new_length:
+            return source
+        if old_length == 1:
+            return np.repeat(source, new_length, axis=0)
+
+        old_positions = np.arange(old_length, dtype=np.float32)
+        new_positions = np.linspace(
+            0.0,
+            float(old_length - 1),
+            new_length,
+            dtype=np.float32,
+        )
+        if source.ndim == 1:
+            return np.interp(new_positions, old_positions, source).astype(np.float32)
+        return np.column_stack(
+            [
+                np.interp(new_positions, old_positions, source[:, channel])
+                for channel in range(source.shape[1])
+            ]
+        ).astype(np.float32)
+
     def _adapt_channels(self, samples):
         import numpy as np
 
         samples = np.asarray(samples, dtype=np.float32)
         if samples.ndim == 1:
-            return np.repeat(samples[:, None], self._output_channels, axis=1)
-        if samples.shape[1] == self._output_channels:
-            return samples
-        if self._output_channels == 1:
-            return np.mean(samples, axis=1, keepdims=True, dtype=np.float32)
-        if samples.shape[1] == 1:
-            return np.repeat(samples, self._output_channels, axis=1)
-        return samples[:, : self._output_channels]
+            adapted = np.repeat(samples[:, None], self._output_channels, axis=1)
+        elif samples.shape[1] == self._output_channels:
+            adapted = samples
+        elif self._output_channels == 1:
+            adapted = np.mean(samples, axis=1, keepdims=True, dtype=np.float32)
+        elif samples.shape[1] == 1:
+            adapted = np.repeat(samples, self._output_channels, axis=1)
+        else:
+            adapted = samples[:, : self._output_channels]
+        return np.clip(adapted * self._gain, -0.95, 0.95)
 
 
 class _MultiOutputSoundDeviceStream:
@@ -597,7 +679,7 @@ class _MultiOutputSoundDeviceStream:
             callback=self._on_input,
         )
         try:
-            for output_id, output_channels in outputs:
+            for index, (output_id, output_channels) in enumerate(outputs):
                 self._outputs.append(
                     _BufferedAudioOutput(
                         sounddevice=sounddevice,
@@ -605,6 +687,7 @@ class _MultiOutputSoundDeviceStream:
                         sample_rate=sample_rate,
                         output_channels=output_channels,
                         block_size=block_size,
+                        gain=1.0 if index == 0 else 0.72,
                     )
                 )
             self._primary_output = self._outputs[0]
@@ -689,6 +772,7 @@ class _MultiOutputSoundDeviceStream:
             sample_rate=self._sample_rate,
             output_channels=output_channels,
             block_size=self._block_size,
+            gain=0.72,
         )
         with self._outputs_lock:
             if self._pending_monitor is not None:
