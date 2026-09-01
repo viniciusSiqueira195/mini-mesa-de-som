@@ -72,7 +72,7 @@ class MainFrame(wx.Frame):
         engine: AudioEngine,
         preferences_store: PreferencesStore | None = None,
     ) -> None:
-        super().__init__(None, title="Mini Mesa de Som Teste", size=(620, 750))
+        super().__init__(None, title="Mini Mesa de Som Teste", size=(640, 840))
         self.engine = engine
         self.engine.set_error_handler(self._on_audio_error)
         self.preferences_store = preferences_store or PreferencesStore()
@@ -188,26 +188,69 @@ class MainFrame(wx.Frame):
         self.spatial_checkbox.SetName("Ativar áudio espacial binaural com HRTF")
         self.spatial_checkbox.SetValue(self.preferences.spatial_enabled)
         self.spatial_checkbox.Bind(wx.EVT_CHECKBOX, self._on_spatial_changed)
-        spatial_label = wx.StaticText(
-            panel,
-            label="Pos&ição da voz em graus: -180 atrás, 0 frente, 180 atrás",
-        )
-        self.spatial_angle = wx.Slider(
-            panel,
-            value=self.preferences.spatial_angle,
-            minValue=-180,
-            maxValue=180,
-            style=wx.SL_HORIZONTAL | wx.SL_LABELS,
-        )
-        self.spatial_angle.SetName(
-            "Posição espacial da voz; valores negativos ficam à esquerda e "
-            "positivos à direita"
-        )
-        self.spatial_angle.Enable(self.preferences.spatial_enabled)
-        self.spatial_angle.Bind(wx.EVT_SLIDER, self._on_spatial_changed)
         spatial.Add(self.spatial_checkbox, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
-        spatial.Add(spatial_label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
-        spatial.Add(self.spatial_angle, 0, wx.ALL | wx.EXPAND, 8)
+
+        coordinates = wx.FlexGridSizer(cols=2, vgap=5, hgap=8)
+        coordinates.AddGrowableCol(1)
+        coordinate_specs = (
+            (
+                "&X, esquerda menos 100 e direita mais 100:",
+                "spatial_x",
+                self.preferences.spatial_x,
+            ),
+            (
+                "&Y, baixo menos 100 e cima mais 100:",
+                "spatial_y",
+                self.preferences.spatial_y,
+            ),
+            (
+                "&Z, trás menos 100 e frente mais 100:",
+                "spatial_z",
+                self.preferences.spatial_z,
+            ),
+        )
+        for label, attribute, value in coordinate_specs:
+            coordinates.Add(wx.StaticText(panel, label=label), 0, wx.ALIGN_CENTER_VERTICAL)
+            control = wx.SpinCtrl(panel, min=-100, max=100, initial=value)
+            control.SetName(label.replace("&", "").rstrip(":"))
+            setattr(self, attribute, control)
+            coordinates.Add(control, 1, wx.EXPAND)
+        spatial.Add(coordinates, 0, wx.ALL | wx.EXPAND, 8)
+
+        self.spatial_automatic = wx.CheckBox(
+            panel,
+            label="Ativar movimento a&utomático pelos três eixos",
+        )
+        self.spatial_automatic.SetName("Movimento espacial automático em X, Y e Z")
+        self.spatial_automatic.SetValue(self.preferences.spatial_automatic)
+        spatial.Add(self.spatial_automatic, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 8)
+
+        speed_row = wx.BoxSizer(wx.HORIZONTAL)
+        speed_row.Add(
+            wx.StaticText(panel, label="&Velocidade automática, 1 a 100:"),
+            0,
+            wx.ALIGN_CENTER_VERTICAL | wx.RIGHT,
+            8,
+        )
+        self.spatial_speed = wx.SpinCtrl(
+            panel,
+            min=1,
+            max=100,
+            initial=self.preferences.spatial_speed,
+        )
+        self.spatial_speed.SetName("Velocidade do movimento espacial automático")
+        speed_row.Add(self.spatial_speed, 1, wx.EXPAND)
+        spatial.Add(speed_row, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 8)
+
+        for control in (
+            self.spatial_x,
+            self.spatial_y,
+            self.spatial_z,
+            self.spatial_speed,
+        ):
+            control.Bind(wx.EVT_SPINCTRL, self._on_spatial_changed)
+        self.spatial_automatic.Bind(wx.EVT_CHECKBOX, self._on_spatial_changed)
+        self._set_spatial_controls_enabled()
         root.Add(spatial, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
 
         actions = wx.BoxSizer(wx.HORIZONTAL)
@@ -600,13 +643,21 @@ class MainFrame(wx.Frame):
             reverb_level=self.reverb_level.GetValue(),
             noise_reduction_enabled=self.noise_reduction_checkbox.GetValue(),
             spatial_enabled=self.spatial_checkbox.GetValue(),
-            spatial_angle=self.spatial_angle.GetValue(),
+            spatial_x=self.spatial_x.GetValue(),
+            spatial_y=self.spatial_y.GetValue(),
+            spatial_z=self.spatial_z.GetValue(),
+            spatial_automatic=self.spatial_automatic.GetValue(),
+            spatial_speed=self.spatial_speed.GetValue(),
         )
 
     def _current_spatial_settings(self) -> SpatialSettings:
         return SpatialSettings(
             enabled=self.spatial_checkbox.GetValue(),
-            angle_degrees=self.spatial_angle.GetValue(),
+            x=self.spatial_x.GetValue(),
+            y=self.spatial_y.GetValue(),
+            z=self.spatial_z.GetValue(),
+            automatic=self.spatial_automatic.GetValue(),
+            speed_percent=self.spatial_speed.GetValue(),
         )
 
     def _save_preferences(self) -> None:
@@ -678,9 +729,17 @@ class MainFrame(wx.Frame):
         if self.reverb_checkbox.GetValue():
             effects.append("reverb")
         if self.spatial_checkbox.GetValue():
-            effects.append(
-                f"áudio espacial em {self.spatial_angle.GetValue()} graus"
-            )
+            if self.spatial_automatic.GetValue():
+                effects.append(
+                    f"áudio espacial automático em velocidade "
+                    f"{self.spatial_speed.GetValue()}"
+                )
+            else:
+                effects.append(
+                    "áudio espacial em "
+                    f"X {self.spatial_x.GetValue()}, Y {self.spatial_y.GetValue()}, "
+                    f"Z {self.spatial_z.GetValue()}"
+                )
         effect_description = " e ".join(effects) if effects else "nenhum efeito"
         self.status.ChangeValue(
             "Mesa ativa. O áudio está sendo enviado para a saída virtual"
@@ -744,21 +803,36 @@ class MainFrame(wx.Frame):
     def _on_spatial_changed(self, event: wx.Event) -> None:
         try:
             enabled = self.spatial_checkbox.GetValue()
-            self.spatial_angle.Enable(enabled)
+            self._set_spatial_controls_enabled()
             settings = self._current_spatial_settings()
             self.engine.update_spatial(settings)
             self._save_preferences()
             if self.engine.is_running:
                 self._show_running_state()
             elif enabled:
-                self.SetStatusText(
-                    f"Áudio espacial preparado em {settings.angle_degrees} graus."
-                )
+                if settings.automatic:
+                    self.SetStatusText(
+                        "Movimento espacial automático preparado em velocidade "
+                        f"{settings.speed_percent}."
+                    )
+                else:
+                    self.SetStatusText(
+                        f"Áudio espacial preparado em X {settings.x}, "
+                        f"Y {settings.y}, Z {settings.z}."
+                    )
             else:
                 self.SetStatusText("Áudio espacial desativado.")
         except (TypeError, ValueError):
             pass
         event.Skip()
+
+    def _set_spatial_controls_enabled(self) -> None:
+        enabled = self.spatial_checkbox.GetValue()
+        automatic = enabled and self.spatial_automatic.GetValue()
+        self.spatial_automatic.Enable(enabled)
+        self.spatial_speed.Enable(automatic)
+        for control in (self.spatial_x, self.spatial_y, self.spatial_z):
+            control.Enable(enabled and not automatic)
 
     def _on_toggle(self, _event: wx.Event) -> None:
         if self.engine.is_running:

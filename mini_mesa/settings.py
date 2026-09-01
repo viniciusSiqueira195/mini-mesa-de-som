@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 
@@ -53,17 +54,46 @@ class ReverbSettings:
 
 @dataclass(frozen=True, slots=True)
 class SpatialSettings:
-    """User-facing horizontal position for binaural HRTF processing."""
+    """Three-dimensional voice position and optional automatic movement."""
 
     enabled: bool = False
-    angle_degrees: int = 0
+    x: int = 0
+    y: int = 0
+    z: int = 100
+    automatic: bool = False
+    speed_percent: int = 35
 
     def __post_init__(self) -> None:
         if not isinstance(self.enabled, bool):
             raise TypeError("Estado do áudio espacial deve ser verdadeiro ou falso")
-        if isinstance(self.angle_degrees, bool) or not isinstance(
-            self.angle_degrees, int
+        for axis, value in (("X", self.x), ("Y", self.y), ("Z", self.z)):
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise TypeError(f"Coordenada {axis} deve ser um número inteiro")
+            if not -100 <= value <= 100:
+                raise ValueError(f"Coordenada {axis} deve estar entre -100 e 100")
+        if not isinstance(self.automatic, bool):
+            raise TypeError("Movimento automático deve ser verdadeiro ou falso")
+        if (
+            isinstance(self.speed_percent, bool)
+            or not isinstance(self.speed_percent, int)
         ):
-            raise TypeError("Posição espacial deve ser um número inteiro")
-        if not -180 <= self.angle_degrees <= 180:
-            raise ValueError("Posição espacial deve estar entre -180 e 180 graus")
+            raise TypeError("Velocidade espacial deve ser um número inteiro")
+        if not 1 <= self.speed_percent <= 100:
+            raise ValueError("Velocidade espacial deve estar entre 1 e 100")
+
+    @property
+    def azimuth_degrees(self) -> int:
+        """Horizontal angle: negative left, zero front, positive right."""
+
+        if self.x == 0 and self.z == 0:
+            return 0
+        return round(math.degrees(math.atan2(self.x, self.z)))
+
+    @property
+    def elevation_degrees(self) -> int:
+        """Vertical angle: negative below and positive above."""
+
+        horizontal_distance = math.hypot(self.x, self.z)
+        if self.y == 0 and horizontal_distance == 0:
+            return 0
+        return round(math.degrees(math.atan2(self.y, horizontal_distance)))

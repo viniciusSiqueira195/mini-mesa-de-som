@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import wave
 from pathlib import Path
 
@@ -10,6 +11,14 @@ from .settings import SpatialSettings
 
 _ANGLES = (0, 45, 90, 135, 180)
 _TRANSITION_MILLISECONDS = 20
+_AUTOMATIC_PATH = (
+    (0, 0, 100),    # front
+    (100, 0, 0),    # right
+    (0, 0, -100),   # behind
+    (-100, 0, 0),   # left
+    (0, 100, 0),    # above
+    (0, -100, 0),   # below
+)
 
 
 class HRTFSpatializer:
@@ -36,6 +45,7 @@ class HRTFSpatializer:
             1, round(self._sample_rate * _TRANSITION_MILLISECONDS / 1000)
         )
         self._transition_remaining = 0
+        self._automatic_progress = 0.0
 
     @property
     def settings(self) -> SpatialSettings:
@@ -45,8 +55,14 @@ class HRTFSpatializer:
         if settings == self._settings:
             return
         self._previous_filter, self._previous_mix = self._effective_target()
-        self._current_filter = self._filter_for_angle(settings.angle_degrees)
+        self._current_filter = self._filter_for_position(
+            settings.x,
+            settings.y,
+            settings.z,
+        )
         self._current_mix = 1.0 if settings.enabled else 0.0
+        if settings.automatic and not self._settings.automatic:
+            self._automatic_progress = 0.0
         self._settings = settings
         self._transition_remaining = self._transition_frames
 
@@ -65,6 +81,10 @@ class HRTFSpatializer:
         mono = np.asarray(mono_samples, dtype=np.float32).reshape(-1)
         if mono.size == 0:
             return np.empty((0, 2), dtype=np.float32)
+
+        if self._settings.enabled and self._settings.automatic:
+            x, y, z = self._next_automatic_position(mono.size)
+            self._retarget_position(x, y, z)
 
         dry = np.column_stack((mono, mono))
         current = self._convolve(mono, self._current_filter)
@@ -90,6 +110,56 @@ class HRTFSpatializer:
             extended = np.concatenate((self._history, mono))
             self._history = extended[-history_length:].copy()
         return target.astype(np.float32, copy=False)
+
+    def _next_automatic_position(self, frame_count: int) -> tuple[int, int, int]:
+        """Advance a smooth 3D orbit using audio frames as the clock."""
+
+        segments_per_second = 0.25 + 1.75 * self._settings.speed_percent / 100.0
+        progress_increment = (
+            segments_per_second * frame_count / self._sample_rate
+        )
+        midpoint = self._automatic_progress + progress_increment / 2.0
+        self._automatic_progress = (
+            self._automatic_progress + progress_increment
+        ) % len(_AUTOMATIC_PATH)
+        start_index = int(midpoint) % len(_AUTOMATIC_PATH)
+        end_index = (start_index + 1) % len(_AUTOMATIC_PATH)
+        amount = midpoint % 1.0
+        start = _AUTOMATIC_PATH[start_index]
+        end = _AUTOMATIC_PATH[end_index]
+        return tuple(
+            round(start[axis] * (1.0 - amount) + end[axis] * amount)
+            for axis in range(3)
+        )
+
+    def _retarget_position(self, x: int, y: int, z: int) -> None:
+        new_filter = self._filter_for_position(x, y, z)
+        self._previous_filter, self._previous_mix = self._effective_target()
+        self._current_filter = new_filter
+        self._transition_remaining = self._transition_frames
+
+    def _filter_for_position(self, x: int, y: int, z: int) -> np.ndarray:
+        azimuth = 0 if x == 0 and z == 0 else round(
+            math.degrees(math.atan2(x, z))
+        )
+        horizontal_distance = math.hypot(x, z)
+        elevation = 0.0 if y == 0 and horizontal_distance == 0 else math.degrees(
+            math.atan2(y, horizontal_distance)
+        )
+        filters = self._filter_for_angle(azimuth)
+        elevation_amount = max(-1.0, min(1.0, elevation / 90.0))
+        if elevation_amount == 0.0:
+            return filters
+
+        delayed = np.pad(filters, ((0, 0), (1, 0)), mode="constant")[:, :-1]
+        if elevation_amount > 0.0:
+            # A subtle high-frequency emphasis approximates the pinna cue above.
+            filters = filters + (filters - delayed) * (0.22 * elevation_amount)
+        else:
+            # A subtle low-pass cue distinguishes positions below the listener.
+            amount = 0.20 * abs(elevation_amount)
+            filters = filters * (1.0 - amount) + delayed * amount
+        return self._normalize(filters)
 
     def _convolve(self, mono: np.ndarray, filters: np.ndarray) -> np.ndarray:
         extended = np.concatenate((self._history, mono))

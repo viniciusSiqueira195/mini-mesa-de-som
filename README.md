@@ -35,7 +35,7 @@ entradas reconhecidas pelo Windows podem ser selecionadas diretamente.
 - Seleção independente do microfone, cabo virtual e dispositivo de retorno.
 - Reverb ajustado por um único controle simples de 0 a 100.
 - Redução neural de ruído RNNoise, opcional e executada localmente.
-- Áudio espacial binaural com HRTF real e posição horizontal de −180° a +180°.
+- Áudio espacial binaural 3D por coordenadas X, Y e Z, com movimento automático.
 - Reverb e redução de ruído utilizáveis separadamente ou em conjunto.
 - Retorno local experimental, mantido aberto para testes e contribuições.
 - Minimização para a bandeja do sistema sem interromper o áudio.
@@ -187,11 +187,15 @@ adiciona um quadro fixo de 10 milissegundos. Para preservar a continuidade do
 ### Áudio espacial binaural
 
 O efeito espacial usa respostas de impulso medidas no manequim acústico KEMAR
-do MIT. Um único controle posiciona a voz ao redor da cabeça: valores negativos
-movem para a esquerda, `0` fica à frente e valores positivos movem para a
-direita. As posições intermediárias são interpoladas e qualquer mudança é
-suavizada para evitar cliques. O efeito pode ser ligado, desligado e movido
-enquanto a mesa está ativa.
+do MIT. Três coordenadas posicionam a voz: X controla esquerda e direita, Y
+controla baixo e cima e Z controla trás e frente. Cada eixo vai de `-100` a
+`100`. As respostas HRTF reais cuidam do plano horizontal e pistas espectrais
+suaves diferenciam cima e baixo.
+
+O movimento automático percorre continuamente os três eixos. Sua velocidade
+pode ser ajustada de `1` a `100`, e o movimento usa o próprio relógio do fluxo
+de áudio para permanecer estável. Posições intermediárias e mudanças manuais
+são suavizadas para evitar cliques, inclusive enquanto a mesa está ativa.
 
 O resultado foi feito para audição em fones e precisa permanecer estéreo até o
 ouvinte. Aplicativos de conversa que transformem o microfone em mono eliminarão
@@ -208,7 +212,9 @@ para avaliá-lo ou use o retorno experimental.
 - `Alt+R`: ajustar o nível de reverb.
 - `Alt+D`: ativar ou desativar a redução de ruído.
 - `Alt+P`: ativar ou desativar o áudio espacial.
-- `Alt+I`: ajustar a posição espacial da voz.
+- `Alt+X`, `Alt+Y` e `Alt+Z`: ajustar as coordenadas espaciais.
+- `Alt+U`: ativar ou desativar o movimento automático.
+- `Alt+V`: ajustar a velocidade do movimento espacial.
 - `Alt+A`: ativar ou desativar a mesa.
 - `Alt+C`: encerrar o programa.
 - `F5`: atualizar os dispositivos.

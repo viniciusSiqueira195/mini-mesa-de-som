@@ -50,16 +50,27 @@ class ReverbSettingsTests(unittest.TestCase):
 
 
 class SpatialSettingsTests(unittest.TestCase):
-    def test_horizontal_position_accepts_the_full_circle(self) -> None:
-        self.assertEqual(SpatialSettings(True, -180).angle_degrees, -180)
-        self.assertEqual(SpatialSettings(True, 180).angle_degrees, 180)
+    def test_coordinates_cover_the_six_cardinal_directions(self) -> None:
+        self.assertEqual(SpatialSettings(True, -100, 0, 0).azimuth_degrees, -90)
+        self.assertEqual(SpatialSettings(True, 100, 0, 0).azimuth_degrees, 90)
+        self.assertEqual(SpatialSettings(True, 0, 0, -100).azimuth_degrees, 180)
+        self.assertEqual(SpatialSettings(True, 0, 0, 100).azimuth_degrees, 0)
+        self.assertEqual(SpatialSettings(True, 0, 100, 0).elevation_degrees, 90)
+        self.assertEqual(SpatialSettings(True, 0, -100, 0).elevation_degrees, -90)
 
-    def test_invalid_horizontal_position_is_rejected(self) -> None:
+    def test_invalid_coordinate_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
-            SpatialSettings(True, 181)
+            SpatialSettings(True, x=101)
 
         with self.assertRaises(TypeError):
-            SpatialSettings(True, 45.5)  # type: ignore[arg-type]
+            SpatialSettings(True, y=45.5)  # type: ignore[arg-type]
+
+    def test_automatic_movement_speed_is_validated(self) -> None:
+        self.assertEqual(SpatialSettings(automatic=True, speed_percent=1).speed_percent, 1)
+        self.assertEqual(SpatialSettings(automatic=True, speed_percent=100).speed_percent, 100)
+
+        with self.assertRaises(ValueError):
+            SpatialSettings(automatic=True, speed_percent=0)
 
 
 if __name__ == "__main__":

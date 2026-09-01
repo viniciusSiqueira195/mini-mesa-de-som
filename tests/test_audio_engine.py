@@ -625,7 +625,7 @@ class AudioEngineTests(unittest.TestCase):
         engine.start("Zeus X", "CABLE Input")
         self.assertTrue(backend.stream.started.wait(timeout=1))
 
-        settings = SpatialSettings(enabled=True, angle_degrees=-90)
+        settings = SpatialSettings(enabled=True, x=-100, y=25, z=0)
         engine.update_spatial(settings)
 
         self.assertEqual(backend.spatial_settings, settings)

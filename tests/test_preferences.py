@@ -23,14 +23,18 @@ class PreferencesStoreTests(unittest.TestCase):
                 reverb_level=72,
                 noise_reduction_enabled=True,
                 spatial_enabled=True,
-                spatial_angle=-90,
+                spatial_x=-80,
+                spatial_y=25,
+                spatial_z=-40,
+                spatial_automatic=True,
+                spatial_speed=60,
             )
 
             store.save(expected)
 
             self.assertEqual(store.load(), expected)
             saved = json.loads(path.read_text(encoding="utf-8"))
-            self.assertEqual(saved["schema_version"], 4)
+            self.assertEqual(saved["schema_version"], 5)
             self.assertEqual(saved["input_device"], "Microfone Áudio")
 
     def test_invalid_file_falls_back_to_defaults(self) -> None:
@@ -50,7 +54,11 @@ class PreferencesStoreTests(unittest.TestCase):
                 "reverb_level": 500,
                 "noise_reduction_enabled": True,
                 "spatial_enabled": True,
-                "spatial_angle": 900,
+                "spatial_x": 900,
+                "spatial_y": -40,
+                "spatial_z": "frente",
+                "spatial_automatic": True,
+                "spatial_speed": 900,
             }
         )
 
@@ -61,7 +69,20 @@ class PreferencesStoreTests(unittest.TestCase):
         self.assertEqual(preferences.reverb_level, 25)
         self.assertTrue(preferences.noise_reduction_enabled)
         self.assertTrue(preferences.spatial_enabled)
-        self.assertEqual(preferences.spatial_angle, 0)
+        self.assertEqual(preferences.spatial_x, 0)
+        self.assertEqual(preferences.spatial_y, -40)
+        self.assertEqual(preferences.spatial_z, 100)
+        self.assertTrue(preferences.spatial_automatic)
+        self.assertEqual(preferences.spatial_speed, 35)
+
+    def test_horizontal_angle_from_schema_four_migrates_to_xyz(self) -> None:
+        preferences = AppPreferences.from_dict(
+            {"spatial_enabled": True, "spatial_angle": -90}
+        )
+
+        self.assertEqual(preferences.spatial_x, -100)
+        self.assertEqual(preferences.spatial_y, 0)
+        self.assertEqual(preferences.spatial_z, 0)
 
 
 if __name__ == "__main__":

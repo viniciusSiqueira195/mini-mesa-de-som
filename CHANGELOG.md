@@ -1,5 +1,12 @@
 # Histórico de versões
 
+## Em desenvolvimento
+
+- Posicionamento binaural 3D por coordenadas X, Y e Z.
+- Movimento espacial automático por frente, direita, trás, esquerda, cima e baixo.
+- Controle acessível de velocidade e migração das preferências horizontais antigas.
+- Descoberta renovada de dispositivos e preferência por WASAPI compartilhado.
+
 ## 0.1.0 — 2026-08-27
 
 Primeira versão pública da Mini Mesa de Som.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -28,7 +29,11 @@ class AppPreferences:
     reverb_level: int = 25
     noise_reduction_enabled: bool = False
     spatial_enabled: bool = False
-    spatial_angle: int = 0
+    spatial_x: int = 0
+    spatial_y: int = 0
+    spatial_z: int = 100
+    spatial_automatic: bool = False
+    spatial_speed: int = 35
 
     @classmethod
     def from_dict(cls, data: object) -> AppPreferences:
@@ -49,13 +54,36 @@ class AppPreferences:
         if isinstance(level, bool) or not isinstance(level, int) or not 0 <= level <= 100:
             level = defaults.reverb_level
 
-        spatial_angle = data.get("spatial_angle", defaults.spatial_angle)
+        def coordinate_value(name: str, default: int) -> int:
+            value = data.get(name, default)
+            if isinstance(value, bool) or not isinstance(value, int):
+                return default
+            return value if -100 <= value <= 100 else default
+
+        if not any(name in data for name in ("spatial_x", "spatial_y", "spatial_z")):
+            old_angle = data.get("spatial_angle", 0)
+            if (
+                isinstance(old_angle, bool)
+                or not isinstance(old_angle, int)
+                or not -180 <= old_angle <= 180
+            ):
+                old_angle = 0
+            radians = math.radians(old_angle)
+            spatial_x = round(math.sin(radians) * 100)
+            spatial_y = 0
+            spatial_z = round(math.cos(radians) * 100)
+        else:
+            spatial_x = coordinate_value("spatial_x", defaults.spatial_x)
+            spatial_y = coordinate_value("spatial_y", defaults.spatial_y)
+            spatial_z = coordinate_value("spatial_z", defaults.spatial_z)
+
+        spatial_speed = data.get("spatial_speed", defaults.spatial_speed)
         if (
-            isinstance(spatial_angle, bool)
-            or not isinstance(spatial_angle, int)
-            or not -180 <= spatial_angle <= 180
+            isinstance(spatial_speed, bool)
+            or not isinstance(spatial_speed, int)
+            or not 1 <= spatial_speed <= 100
         ):
-            spatial_angle = defaults.spatial_angle
+            spatial_speed = defaults.spatial_speed
 
         return cls(
             welcome_shown=bool_value("welcome_shown", defaults.welcome_shown),
@@ -71,7 +99,13 @@ class AppPreferences:
                 "noise_reduction_enabled", defaults.noise_reduction_enabled
             ),
             spatial_enabled=bool_value("spatial_enabled", defaults.spatial_enabled),
-            spatial_angle=spatial_angle,
+            spatial_x=spatial_x,
+            spatial_y=spatial_y,
+            spatial_z=spatial_z,
+            spatial_automatic=bool_value(
+                "spatial_automatic", defaults.spatial_automatic
+            ),
+            spatial_speed=spatial_speed,
         )
 
 
@@ -92,7 +126,7 @@ class PreferencesStore:
         try:
             with temporary_path.open("w", encoding="utf-8", newline="\n") as output:
                 json.dump(
-                    {"schema_version": 4, **asdict(preferences)},
+                    {"schema_version": 5, **asdict(preferences)},
                     output,
                     ensure_ascii=False,
                     indent=2,
