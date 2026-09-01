@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-from .preferences import default_preferences_path
+from .preferences import default_preferences_path, legacy_preferences_paths
 
 
 _MAX_CUSTOM_FILE_BYTES = 256 * 1024 * 1024
@@ -65,9 +65,13 @@ class SoundboardMixer:
         if sample_rate <= 0:
             raise ValueError("A taxa de amostragem deve ser positiva.")
         self.sample_rate = int(sample_rate)
-        self._personal_directory = asset_directory or (
-            default_preferences_path().parent / "sounds"
-        )
+        if asset_directory is not None:
+            self._personal_directories = (asset_directory,)
+        else:
+            self._personal_directories = (
+                default_preferences_path().parent / "sounds",
+                *(path.parent / "sounds" for path in legacy_preferences_paths()),
+            )
         self._bundled_directory = Path(__file__).parent / "assets" / "sounds"
         self._active: list[_Playback] = []
         self._builtins: dict[str, np.ndarray] = {}
@@ -176,15 +180,16 @@ class SoundboardMixer:
                 del self._active[:-_MAX_SIMULTANEOUS_PLAYBACKS]
 
     def _effect_path(self, effect_id: str) -> Path:
-        personal_path = self._personal_directory / f"{effect_id}.wav"
-        if personal_path.is_file():
-            return personal_path
+        for personal_directory in self._personal_directories:
+            personal_path = personal_directory / f"{effect_id}.wav"
+            if personal_path.is_file():
+                return personal_path
         bundled_path = self._bundled_directory / f"{effect_id}.wav"
         if bundled_path.is_file():
             return bundled_path
         raise SoundEffectError(
             f"O arquivo do efeito '{effect_id}' não foi instalado em "
-            f"'{self._personal_directory}'."
+            f"'{self._personal_directories[0]}'."
         )
 
 

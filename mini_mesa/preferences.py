@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import os
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -14,7 +15,8 @@ from .settings import (
 )
 
 
-_APP_DIRECTORY = "Mini Mesa de Som Teste"
+_APP_DIRECTORY = "Mini Mesa de Som"
+_LEGACY_APP_DIRECTORIES = ("Mini Mesa de Som Teste",)
 _PREFERENCES_FILENAME = "preferences.json"
 
 
@@ -23,6 +25,15 @@ def default_preferences_path() -> Path:
     if app_data:
         return Path(app_data) / _APP_DIRECTORY / _PREFERENCES_FILENAME
     return Path.home() / ".config" / _APP_DIRECTORY / _PREFERENCES_FILENAME
+
+
+def legacy_preferences_paths() -> tuple[Path, ...]:
+    app_data = os.environ.get("APPDATA")
+    root = Path(app_data) if app_data else Path.home() / ".config"
+    return tuple(
+        root / directory / _PREFERENCES_FILENAME
+        for directory in _LEGACY_APP_DIRECTORIES
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -255,15 +266,33 @@ class AppPreferences:
 
 
 class PreferencesStore:
-    def __init__(self, path: Path | None = None) -> None:
+    def __init__(
+        self,
+        path: Path | None = None,
+        *,
+        legacy_paths: Sequence[Path] | None = None,
+    ) -> None:
+        uses_default_path = path is None
         self.path = path or default_preferences_path()
+        self.legacy_paths = tuple(
+            legacy_preferences_paths() if uses_default_path and legacy_paths is None
+            else legacy_paths or ()
+        )
 
     def load(self) -> AppPreferences:
-        try:
-            with self.path.open("r", encoding="utf-8") as preferences_file:
-                return AppPreferences.from_dict(json.load(preferences_file))
-        except (OSError, UnicodeError, json.JSONDecodeError):
-            return AppPreferences()
+        for candidate in (self.path, *self.legacy_paths):
+            try:
+                with candidate.open("r", encoding="utf-8") as preferences_file:
+                    preferences = AppPreferences.from_dict(json.load(preferences_file))
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                continue
+            if candidate != self.path:
+                try:
+                    self.save(preferences)
+                except OSError:
+                    pass
+            return preferences
+        return AppPreferences()
 
     def save(self, preferences: AppPreferences) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)

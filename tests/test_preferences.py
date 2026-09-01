@@ -44,6 +44,25 @@ class PreferencesStoreTests(unittest.TestCase):
 
             self.assertEqual(PreferencesStore(path).load(), AppPreferences())
 
+    def test_legacy_test_directory_is_migrated_without_losing_preferences(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            current = root / "Mini Mesa de Som" / "preferences.json"
+            legacy = root / "Mini Mesa de Som Teste" / "preferences.json"
+            legacy.parent.mkdir(parents=True)
+            legacy.write_text(
+                json.dumps({"input_device": "Microfone antigo", "reverb_level": 61}),
+                encoding="utf-8",
+            )
+            store = PreferencesStore(current, legacy_paths=(legacy,))
+
+            preferences = store.load()
+
+            self.assertEqual(preferences.input_device, "Microfone antigo")
+            self.assertEqual(preferences.reverb_level, 61)
+            self.assertTrue(current.is_file())
+            self.assertEqual(PreferencesStore(current).load(), preferences)
+
     def test_invalid_fields_do_not_poison_valid_preferences(self) -> None:
         preferences = AppPreferences.from_dict(
             {

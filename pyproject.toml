@@ -3,12 +3,13 @@ requires = ["setuptools>=75"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mini-mesa-de-som-teste"
-version = "0.1.0"
+name = "mini-mesa-de-som"
+version = "0.2.0"
 description = "Mesa de som virtual acessível com efeitos de voz em tempo real."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "Markdown>=3.7,<4",
     "numpy>=2,<3",
     "pedalboard>=0.9.24,<1",
     "pyrnnoise==0.4.3",

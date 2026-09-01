@@ -7,6 +7,8 @@ from pathlib import Path
 
 import wx
 import wx.adv
+import wx.html2
+from markdown import markdown as render_markdown
 
 from .audio_engine import AudioDependencyError, AudioEngine, match_device_label
 from .preferences import AppPreferences, PreferencesStore
@@ -59,12 +61,42 @@ def _markdown_to_accessible_text(markdown: str) -> str:
 def _load_project_help(readme_path: Path | None = None) -> str:
     """Load the README used by source runs and bundled Windows builds."""
 
-    path = readme_path or Path(__file__).resolve().parent.parent / "README.md"
-    try:
-        markdown = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeError):
+    markdown = _load_project_markdown(readme_path)
+    if markdown is None:
         return _HELP_FALLBACK
     return _markdown_to_accessible_text(markdown) or _HELP_FALLBACK
+
+
+def _load_project_markdown(readme_path: Path | None = None) -> str | None:
+    """Return the canonical README without maintaining a second help document."""
+
+    path = readme_path or Path(__file__).resolve().parent.parent / "README.md"
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return None
+
+
+def _markdown_to_help_html(markdown: str) -> str:
+    """Render trusted project Markdown with real headings for browse mode."""
+
+    body = render_markdown(
+        markdown,
+        extensions=("fenced_code", "sane_lists", "toc"),
+        output_format="html5",
+    )
+    return (
+        "<!doctype html><html lang='pt-BR'><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+        "<style>"
+        ":root{color-scheme:light dark}"
+        "body{font-family:Segoe UI,sans-serif;line-height:1.55;max-width:70rem;"
+        "margin:1.5rem auto;padding:0 1rem}"
+        "a{color:#0674c4}code,pre{font-family:Consolas,monospace}"
+        "pre{overflow:auto;padding:.75rem;border:1px solid currentColor}"
+        "</style></head><body>"
+        f"{body}</body></html>"
+    )
 
 _VOICE_PRESETS = (
     ("female", "Voz feminina (+4 semitons)", 4),
@@ -321,30 +353,66 @@ class SoundboardDialog(wx.Dialog):
 
 
 class HelpDialog(wx.Dialog):
-    """Accessible README viewer opened with F1."""
+    """README help with semantic web headings and a continuous-text fallback."""
 
     def __init__(self, parent: MainFrame) -> None:
         super().__init__(parent, title="Ajuda da Mini Mesa de Som", size=(700, 620))
         root = wx.BoxSizer(wx.VERTICAL)
-        instructions = wx.StaticText(
+        self.instructions = wx.StaticText(
             self,
             label=(
-                "Documentação completa do projeto. Use as setas para ler, "
-                "Page Up e Page Down para navegar, Home para o início e End "
-                "para o final."
+                "Modo página web. Use H e Shift+H para navegar pelos cabeçalhos, "
+                "os números de 1 a 6 para escolher o nível e as setas para ler."
             ),
         )
-        root.Add(instructions, 0, wx.ALL | wx.EXPAND, 10)
+        root.Add(self.instructions, 0, wx.ALL | wx.EXPAND, 10)
+        markdown = _load_project_markdown()
         self.help_text = wx.TextCtrl(
             self,
-            value=_load_project_help(),
+            value=(
+                _markdown_to_accessible_text(markdown)
+                if markdown is not None
+                else _HELP_FALLBACK
+            ),
             style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_RICH2,
         )
         self.help_text.SetName("Documentação da Mini Mesa de Som")
         self.help_text.SetInsertionPoint(0)
-        root.Add(self.help_text, 1, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 10)
+        self.web_help: wx.html2.WebView | None = None
+        try:
+            if markdown is not None:
+                web_help = wx.html2.WebView.New(self)
+                web_help.SetName("Documentação web da Mini Mesa de Som")
+                web_help.SetPage(_markdown_to_help_html(markdown), _PROJECT_URL)
+                self.web_help = web_help
+                root.Add(
+                    web_help,
+                    1,
+                    wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND,
+                    10,
+                )
+        except Exception:
+            self.web_help = None
+        root.Add(
+            self.help_text,
+            1,
+            wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND,
+            10,
+        )
+        if self.web_help is not None:
+            self.help_text.Hide()
+            self._web_mode = True
+        else:
+            self._web_mode = False
+            self.instructions.SetLabel(
+                "Modo texto contínuo. Use as setas, Page Up, Page Down, Home e End."
+            )
 
         actions = wx.BoxSizer(wx.HORIZONTAL)
+        self.mode_button = wx.Button(self, label="Usar modo de &texto contínuo")
+        self.mode_button.Bind(wx.EVT_BUTTON, self._on_toggle_reading_mode)
+        self.mode_button.Enable(self.web_help is not None)
+        actions.Add(self.mode_button, 1, wx.RIGHT | wx.EXPAND, 5)
         project_button = wx.Button(self, label="Abrir &projeto no GitHub")
         project_button.Bind(
             wx.EVT_BUTTON, lambda _event: wx.LaunchDefaultBrowser(_PROJECT_URL)
@@ -359,7 +427,31 @@ class HelpDialog(wx.Dialog):
         actions.Add(close_button, 1, wx.LEFT | wx.EXPAND, 5)
         root.Add(actions, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 10)
         self.SetSizer(root)
-        self.help_text.SetFocus()
+        if self.web_help is not None:
+            wx.CallAfter(self.web_help.SetFocus)
+        else:
+            self.help_text.SetFocus()
+
+    def _on_toggle_reading_mode(self, _event: wx.Event) -> None:
+        if self.web_help is None:
+            return
+        self._web_mode = not self._web_mode
+        self.web_help.Show(self._web_mode)
+        self.help_text.Show(not self._web_mode)
+        if self._web_mode:
+            self.instructions.SetLabel(
+                "Modo página web. Use H e Shift+H para navegar pelos cabeçalhos, "
+                "os números de 1 a 6 para escolher o nível e as setas para ler."
+            )
+            self.mode_button.SetLabel("Usar modo de &texto contínuo")
+            self.web_help.SetFocus()
+        else:
+            self.instructions.SetLabel(
+                "Modo texto contínuo. Use as setas, Page Up, Page Down, Home e End."
+            )
+            self.mode_button.SetLabel("Usar navegação por &cabeçalhos")
+            self.help_text.SetFocus()
+        self.Layout()
 
 
 class MainFrame(wx.Frame):
@@ -373,7 +465,7 @@ class MainFrame(wx.Frame):
             min(620, max(400, display_area.GetWidth() - 40)),
             min(800, max(480, display_area.GetHeight() - 80)),
         )
-        super().__init__(None, title="Mini Mesa de Som Teste", size=frame_size)
+        super().__init__(None, title="Mini Mesa de Som", size=frame_size)
         self.engine = engine
         self.engine.set_error_handler(self._on_audio_error)
         self.preferences_store = preferences_store or PreferencesStore()
@@ -1863,7 +1955,7 @@ class MainFrame(wx.Frame):
         self._show_error(f"O processamento de áudio foi interrompido.\n\n{message}")
 
     def _show_error(self, message: str) -> None:
-        wx.MessageBox(message, "Mini Mesa de Som Teste", wx.OK | wx.ICON_ERROR, self)
+        wx.MessageBox(message, "Mini Mesa de Som", wx.OK | wx.ICON_ERROR, self)
 
     def _on_close(self, event: wx.CloseEvent) -> None:
         if self._update_cancel_event is not None:
@@ -1884,11 +1976,11 @@ class MainFrame(wx.Frame):
 
 def run() -> int:
     app = wx.App(False)
-    app.SetAppName("Mini Mesa de Som Teste")
+    app.SetAppName("Mini Mesa de Som")
     try:
         engine = AudioEngine()
     except AudioDependencyError as exc:
-        wx.MessageBox(str(exc), "Mini Mesa de Som Teste", wx.OK | wx.ICON_ERROR)
+        wx.MessageBox(str(exc), "Mini Mesa de Som", wx.OK | wx.ICON_ERROR)
         return 1
 
     frame = MainFrame(engine)

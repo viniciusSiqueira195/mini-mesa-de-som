@@ -103,6 +103,28 @@ class UpdaterTests(unittest.TestCase):
             self.assertEqual(installer, Path(temporary_directory) / info.installer_name)
             self.assertEqual(installer.read_bytes(), payload)
 
+    def test_launch_installer_uses_safe_silent_update_arguments(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            installer = Path(temporary_directory) / "MiniMesaDeSom-Setup-0.2.0.exe"
+            installer.write_bytes(b"MZ")
+
+            with patch.object(updater.subprocess, "Popen") as popen:
+                updater.launch_installer(installer)
+
+            popen.assert_called_once_with(
+                [
+                    str(installer.resolve()),
+                    "/VERYSILENT",
+                    "/SP-",
+                    "/SUPPRESSMSGBOXES",
+                    "/NORESTART",
+                    "/NOCANCEL",
+                    "/MERGETASKS=!vbcable",
+                ],
+                cwd=str(installer.parent.resolve()),
+                close_fds=True,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

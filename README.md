@@ -11,7 +11,7 @@ um cabo de áudio virtual usado pelo Discord, TeamTalk, WhatsApp ou outro progra
 
 ## Instalação rápida
 
-Baixe `MiniMesaDeSom-Setup-0.1.0.exe` na página da
+Baixe `MiniMesaDeSom-Setup-0.2.0.exe` na página da
 [versão mais recente](https://github.com/viniciusSiqueira195/mini-mesa-de-som/releases/latest)
 e execute o instalador. Ele pode instalar opcionalmente o VB-CABLE oficial,
 necessário para enviar o áudio processado ao TeamTalk, Discord ou outro programa.
@@ -142,7 +142,7 @@ Depois execute:
 
 O script roda os testes, empacota o programa com PyInstaller, baixa os pacotes
 oficiais do VB-CABLE e AudioDeviceCmdlets com verificação SHA-256 e gera
-`installer-output\MiniMesaDeSom-Setup-0.1.0.exe`. O aplicativo é empacotado em
+`installer-output\MiniMesaDeSom-Setup-0.2.0.exe`. O aplicativo é empacotado em
 uma pasta interna para dar mais estabilidade às bibliotecas nativas de áudio;
 para o usuário, a entrega continua sendo um único instalador.
 
@@ -228,7 +228,7 @@ reverb e áudio espacial 3D ativos também processam todos os sons do soundboard
 O pacote pessoal instalado neste computador oferece um tiro de pistola, uma
 rajada de metralhadora, palmas, uma air horn de DJ com quatro segundos e a frase
 "Sensacional!" de Mano Brown. Esses arquivos ficam em
-`%APPDATA%\Mini Mesa de Som Teste\sounds`, fora do Git e disponíveis sem internet.
+`%APPDATA%\Mini Mesa de Som\sounds`, fora do Git e disponíveis sem internet.
 As palmas vêm do Mixkit, o tiro e a air horn vêm do Orange Free Sounds e a voz
 foi obtida no Myinstants. O pacote é usado apenas para diversão pessoal e não é
 distribuído junto com o programa. A procedência completa fica registrada em
@@ -262,18 +262,27 @@ distribuído junto com o programa. A procedência completa fica registrada em
 - `F6`: escolher uma vinheta de áudio personalizada.
 - `Alt+J`, depois `A`: abrir Ajuda e verificar atualizações.
 
+Na ajuda aberta por `F1`, leitores de tela podem usar `H` e `Shift+H` para
+navegar entre os cabeçalhos, ou as teclas `1` a `6` para navegar por nível. O
+botão **Usar modo de texto contínuo** preserva a leitura tradicional com as
+setas, Page Up e Page Down.
+
 ## Preferências
 
 As preferências são gravadas automaticamente em:
 
 ```text
-%APPDATA%\Mini Mesa de Som Teste\preferences.json
+%APPDATA%\Mini Mesa de Som\preferences.json
 ```
 
 O arquivo inclui os dispositivos, o retorno e os estados dos efeitos. A gravação usa um
 arquivo temporário antes da substituição, reduzindo o risco de corrupção. Se o
 JSON estiver inválido ou um dispositivo desaparecer, a mesa usa valores seguros
 e seleciona uma alternativa disponível.
+
+Ao atualizar uma instalação antiga, as preferências e os efeitos pessoais da
+pasta `%APPDATA%\Mini Mesa de Som Teste` continuam sendo reconhecidos e as
+preferências são migradas automaticamente para o novo nome.
 
 ## Compatibilidade de áudio no Windows
 

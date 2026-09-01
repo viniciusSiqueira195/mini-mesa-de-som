@@ -98,6 +98,16 @@ class HelpContentTests(unittest.TestCase):
             "Ajuda\n\n• Use F1.\nProjeto — https://example.com",
         )
 
+    def test_markdown_headings_remain_semantic_in_web_mode(self) -> None:
+        html = ui._markdown_to_help_html(
+            "# Mini Mesa\n\n## Atalhos\n\n### Créditos"
+        )
+
+        self.assertIn("<html lang='pt-BR'>", html)
+        self.assertIn('<h1 id="mini-mesa">Mini Mesa</h1>', html)
+        self.assertIn('<h2 id="atalhos">Atalhos</h2>', html)
+        self.assertIn('<h3 id="creditos">Créditos</h3>', html)
+
     def test_missing_readme_has_an_actionable_fallback(self) -> None:
         help_text = ui._load_project_help(Path("missing-readme-for-test.md"))
 

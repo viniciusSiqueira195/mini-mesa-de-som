@@ -4,6 +4,7 @@ import tempfile
 import unittest
 import wave
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 import soundfile as sf
@@ -100,6 +101,34 @@ class SoundboardMixerTests(unittest.TestCase):
             mixer = SoundboardMixer(Path(directory))
             with self.assertRaisesRegex(SoundEffectError, "sensational_brown.*não foi instalado"):
                 mixer.trigger("sensational_brown")
+
+    def test_personal_effects_from_the_legacy_test_directory_still_work(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            current_preferences = root / "Mini Mesa de Som" / "preferences.json"
+            legacy_preferences = (
+                root / "Mini Mesa de Som Teste" / "preferences.json"
+            )
+            _write_test_wave(
+                legacy_preferences.parent / "sounds" / "pistol.wav",
+                np.full(4, 0.2),
+            )
+            with (
+                patch(
+                    "mini_mesa.soundboard.default_preferences_path",
+                    return_value=current_preferences,
+                ),
+                patch(
+                    "mini_mesa.soundboard.legacy_preferences_paths",
+                    return_value=(legacy_preferences,),
+                ),
+            ):
+                mixer = SoundboardMixer()
+                mixer.set_volume_percent(100)
+
+            mixer.trigger("pistol")
+
+            np.testing.assert_allclose(mixer.mix(4), np.full((4, 2), 0.2), atol=0.0001)
 
     def test_soundboard_settings_validation(self) -> None:
         settings = SoundboardSettings(
