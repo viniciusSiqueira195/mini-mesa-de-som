@@ -133,6 +133,27 @@ _AMBIENCES = (
 )
 
 
+class _NamedSliderAccessible(wx.Accessible):
+    """Expose a stable MSAA name for a native Windows slider and its thumb."""
+
+    def __init__(self, slider: wx.Slider, name: str) -> None:
+        super().__init__(slider)
+        self._name = name
+
+    def GetName(self, _child_id: int) -> tuple[wx.AccStatus, str]:
+        return wx.ACC_OK, self._name
+
+
+def _set_slider_accessible_name(slider: wx.Slider, name: str) -> wx.Accessible:
+    """Set both wx/native labels and the name returned directly to readers."""
+
+    slider.SetName(name)
+    slider.SetLabel(name)
+    accessible = _NamedSliderAccessible(slider, name)
+    slider.SetAccessible(accessible)
+    return accessible
+
+
 class SystemTrayIcon(wx.adv.TaskBarIcon):
     """Keep the mixer reachable after Windows minimizes the main window."""
 
@@ -549,6 +570,10 @@ class MainFrame(wx.Frame):
             minValue=0,
             maxValue=100,
             style=wx.SL_HORIZONTAL | wx.SL_LABELS,
+            name="Intensidade do estilo de voz especial",
+        )
+        self._style_intensity_accessible = _set_slider_accessible_name(
+            self.style_intensity, "Intensidade do estilo de voz especial"
         )
         self.style_intensity.Bind(wx.EVT_SLIDER, self._on_creative_changed)
         modulation_intensity_label = wx.StaticText(
@@ -560,6 +585,10 @@ class MainFrame(wx.Frame):
             minValue=0,
             maxValue=100,
             style=wx.SL_HORIZONTAL | wx.SL_LABELS,
+            name="Intensidade da modulação da voz",
+        )
+        self._modulation_intensity_accessible = _set_slider_accessible_name(
+            self.modulation_intensity, "Intensidade da modulação da voz"
         )
         self.modulation_intensity.Bind(wx.EVT_SLIDER, self._on_creative_changed)
         ambience_intensity_label = wx.StaticText(
@@ -571,6 +600,10 @@ class MainFrame(wx.Frame):
             minValue=0,
             maxValue=100,
             style=wx.SL_HORIZONTAL | wx.SL_LABELS,
+            name="Intensidade do ambiente da voz",
+        )
+        self._ambience_intensity_accessible = _set_slider_accessible_name(
+            self.ambience_intensity, "Intensidade do ambiente da voz"
         )
         self.ambience_intensity.Bind(wx.EVT_SLIDER, self._on_creative_changed)
         self.roger_beep_checkbox = wx.CheckBox(
@@ -757,15 +790,21 @@ class MainFrame(wx.Frame):
             ),
         )
         for label, attribute, value in coordinate_specs:
-            coordinates.Add(wx.StaticText(panel, label=label), 0, wx.ALIGN_CENTER_VERTICAL)
-            control = wx.SpinCtrl(panel, min=-100, max=100, initial=value)
+            coordinates.Add(
+                wx.StaticText(box_spatial, label=label),
+                0,
+                wx.ALIGN_CENTER_VERTICAL,
+            )
+            control = wx.SpinCtrl(
+                box_spatial, min=-100, max=100, initial=value
+            )
             control.SetName(label.replace("&", "").rstrip(":"))
             setattr(self, attribute, control)
             coordinates.Add(control, 1, wx.EXPAND)
         spatial.Add(coordinates, 0, wx.ALL | wx.EXPAND, 8)
 
         self.spatial_automatic = wx.CheckBox(
-            panel,
+            box_spatial,
             label="Ativar movimento a&utomático pelos três eixos",
         )
         self.spatial_automatic.SetName("Movimento espacial automático em X, Y e Z")
@@ -774,13 +813,13 @@ class MainFrame(wx.Frame):
 
         speed_row = wx.BoxSizer(wx.HORIZONTAL)
         speed_row.Add(
-            wx.StaticText(panel, label="&Velocidade automática, 1 a 100:"),
+            wx.StaticText(box_spatial, label="&Velocidade automática, 1 a 100:"),
             0,
             wx.ALIGN_CENTER_VERTICAL | wx.RIGHT,
             8,
         )
         self.spatial_speed = wx.SpinCtrl(
-            panel,
+            box_spatial,
             min=1,
             max=100,
             initial=self.preferences.spatial_speed,
