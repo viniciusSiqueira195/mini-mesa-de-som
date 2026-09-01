@@ -34,7 +34,7 @@ class PreferencesStoreTests(unittest.TestCase):
 
             self.assertEqual(store.load(), expected)
             saved = json.loads(path.read_text(encoding="utf-8"))
-            self.assertEqual(saved["schema_version"], 5)
+            self.assertEqual(saved["schema_version"], 7)
             self.assertEqual(saved["input_device"], "Microfone Áudio")
 
     def test_invalid_file_falls_back_to_defaults(self) -> None:
@@ -83,6 +83,13 @@ class PreferencesStoreTests(unittest.TestCase):
         self.assertEqual(preferences.spatial_x, -100)
         self.assertEqual(preferences.spatial_y, 0)
         self.assertEqual(preferences.spatial_z, 0)
+
+    def test_legacy_voice_pitch_migrates_to_the_matching_preset(self) -> None:
+        preferences = AppPreferences.from_dict(
+            {"voice_enabled": True, "voice_pitch_semitones": -4.0}
+        )
+
+        self.assertEqual(preferences.voice_preset, "male")
 
 
 if __name__ == "__main__":

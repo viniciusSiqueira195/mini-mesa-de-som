@@ -6,6 +6,13 @@ import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from .settings import (
+    VALID_AMBIENCES,
+    VALID_CREATIVE_PRESETS,
+    VALID_MODULATIONS,
+    VALID_VOICE_PRESETS,
+)
+
 
 _APP_DIRECTORY = "Mini Mesa de Som Teste"
 _PREFERENCES_FILENAME = "preferences.json"
@@ -34,6 +41,39 @@ class AppPreferences:
     spatial_z: int = 100
     spatial_automatic: bool = False
     spatial_speed: int = 35
+    voice_enabled: bool = False
+    voice_preset: str = "female"
+    voice_pitch_semitones: float = 4.0
+    creative_effect_preset: str = "none"
+    modulation_effect: str = "none"
+    ambience_preset: str = "none"
+    delay_enabled: bool = False
+    delay_level_percent: int = 30
+    style_intensity_percent: int = 70
+    modulation_intensity_percent: int = 60
+    ambience_intensity_percent: int = 50
+    roger_beep_enabled: bool = False
+    compressor_enabled: bool = False
+    eq_enabled: bool = False
+    eq_low_db: float = 0.0
+    eq_mid_db: float = 0.0
+    eq_high_db: float = 0.0
+    noise_gate_enabled: bool = False
+    deesser_enabled: bool = False
+    expander_enabled: bool = False
+    auto_gain_enabled: bool = False
+    plosive_filter_enabled: bool = False
+    soundboard_volume_percent: int = 80
+    soundboard_ducking_enabled: bool = False
+    soundboard_ducking_percent: int = 60
+
+    @property
+    def spatial_angle(self) -> int:
+        """Legacy horizontal angle retained for older integrations."""
+
+        if self.spatial_x == 0 and self.spatial_z == 0:
+            return 0
+        return round(math.degrees(math.atan2(self.spatial_x, self.spatial_z)))
 
     @classmethod
     def from_dict(cls, data: object) -> AppPreferences:
@@ -49,6 +89,12 @@ class AppPreferences:
         def bool_value(name: str, default: bool) -> bool:
             value = data.get(name, default)
             return value if isinstance(value, bool) else default
+
+        def float_db_value(name: str, default: float) -> float:
+            val = data.get(name, default)
+            if isinstance(val, bool) or not isinstance(val, (int, float)) or not -12.0 <= float(val) <= 12.0:
+                return default
+            return float(val)
 
         level = data.get("reverb_level", defaults.reverb_level)
         if isinstance(level, bool) or not isinstance(level, int) or not 0 <= level <= 100:
@@ -85,6 +131,70 @@ class AppPreferences:
         ):
             spatial_speed = defaults.spatial_speed
 
+        voice_pitch = data.get("voice_pitch_semitones", defaults.voice_pitch_semitones)
+        if (
+            isinstance(voice_pitch, bool)
+            or not isinstance(voice_pitch, (int, float))
+            or not -12.0 <= float(voice_pitch) <= 12.0
+        ):
+            voice_pitch = defaults.voice_pitch_semitones
+        else:
+            voice_pitch = float(voice_pitch)
+
+        preset = text_value("creative_effect_preset", defaults.creative_effect_preset)
+        if preset not in VALID_CREATIVE_PRESETS:
+            preset = defaults.creative_effect_preset
+        legacy_voice_presets = {
+            4.0: "female",
+            3.0: "female_soft",
+            6.0: "female_thin",
+            -4.0: "male",
+        }
+        voice_preset = text_value(
+            "voice_preset",
+            legacy_voice_presets.get(voice_pitch, "custom"),
+        )
+        if voice_preset not in VALID_VOICE_PRESETS:
+            voice_preset = defaults.voice_preset
+        modulation = text_value("modulation_effect", defaults.modulation_effect)
+        if modulation not in VALID_MODULATIONS:
+            modulation = defaults.modulation_effect
+        ambience = text_value("ambience_preset", defaults.ambience_preset)
+        if ambience not in VALID_AMBIENCES:
+            ambience = defaults.ambience_preset
+
+        delay_level = data.get("delay_level_percent", defaults.delay_level_percent)
+        if (
+            isinstance(delay_level, bool)
+            or not isinstance(delay_level, int)
+            or not 0 <= delay_level <= 100
+        ):
+            delay_level = defaults.delay_level_percent
+
+        def percent_value(name: str, default: int) -> int:
+            value = data.get(name, default)
+            if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 100:
+                return default
+            return value
+
+        style_intensity = percent_value(
+            "style_intensity_percent", defaults.style_intensity_percent
+        )
+        modulation_intensity = percent_value(
+            "modulation_intensity_percent", defaults.modulation_intensity_percent
+        )
+        ambience_intensity = percent_value(
+            "ambience_intensity_percent", defaults.ambience_intensity_percent
+        )
+
+        sb_volume = data.get("soundboard_volume_percent", defaults.soundboard_volume_percent)
+        if (
+            isinstance(sb_volume, bool)
+            or not isinstance(sb_volume, int)
+            or not 0 <= sb_volume <= 100
+        ):
+            sb_volume = defaults.soundboard_volume_percent
+
         return cls(
             welcome_shown=bool_value("welcome_shown", defaults.welcome_shown),
             input_device=text_value("input_device", defaults.input_device),
@@ -106,6 +216,41 @@ class AppPreferences:
                 "spatial_automatic", defaults.spatial_automatic
             ),
             spatial_speed=spatial_speed,
+            voice_enabled=bool_value("voice_enabled", defaults.voice_enabled),
+            voice_preset=voice_preset,
+            voice_pitch_semitones=voice_pitch,
+            creative_effect_preset=preset,
+            modulation_effect=modulation,
+            ambience_preset=ambience,
+            delay_enabled=bool_value("delay_enabled", defaults.delay_enabled),
+            delay_level_percent=delay_level,
+            style_intensity_percent=style_intensity,
+            modulation_intensity_percent=modulation_intensity,
+            ambience_intensity_percent=ambience_intensity,
+            roger_beep_enabled=bool_value(
+                "roger_beep_enabled", defaults.roger_beep_enabled
+            ),
+            compressor_enabled=bool_value("compressor_enabled", defaults.compressor_enabled),
+            eq_enabled=bool_value("eq_enabled", defaults.eq_enabled),
+            eq_low_db=float_db_value("eq_low_db", defaults.eq_low_db),
+            eq_mid_db=float_db_value("eq_mid_db", defaults.eq_mid_db),
+            eq_high_db=float_db_value("eq_high_db", defaults.eq_high_db),
+            noise_gate_enabled=bool_value(
+                "noise_gate_enabled", defaults.noise_gate_enabled
+            ),
+            deesser_enabled=bool_value("deesser_enabled", defaults.deesser_enabled),
+            expander_enabled=bool_value("expander_enabled", defaults.expander_enabled),
+            auto_gain_enabled=bool_value("auto_gain_enabled", defaults.auto_gain_enabled),
+            plosive_filter_enabled=bool_value(
+                "plosive_filter_enabled", defaults.plosive_filter_enabled
+            ),
+            soundboard_volume_percent=sb_volume,
+            soundboard_ducking_enabled=bool_value(
+                "soundboard_ducking_enabled", defaults.soundboard_ducking_enabled
+            ),
+            soundboard_ducking_percent=percent_value(
+                "soundboard_ducking_percent", defaults.soundboard_ducking_percent
+            ),
         )
 
 
@@ -126,7 +271,7 @@ class PreferencesStore:
         try:
             with temporary_path.open("w", encoding="utf-8", newline="\n") as output:
                 json.dump(
-                    {"schema_version": 5, **asdict(preferences)},
+                    {"schema_version": 7, **asdict(preferences)},
                     output,
                     ensure_ascii=False,
                     indent=2,

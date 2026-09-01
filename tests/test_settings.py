@@ -10,7 +10,7 @@ class ReverbSettingsTests(unittest.TestCase):
         settings = ReverbSettings()
 
         self.assertAlmostEqual(settings.wet_level, 0.18)
-        self.assertAlmostEqual(settings.dry_level, 0.72)
+        self.assertAlmostEqual(settings.dry_level, 0.36)
         self.assertEqual(settings.room_size, 0.4)
         self.assertEqual(settings.damping, 0.5)
 
@@ -19,22 +19,25 @@ class ReverbSettingsTests(unittest.TestCase):
         maximum = ReverbSettings(100)
 
         self.assertEqual(disabled.wet_level, 0.0)
-        self.assertEqual(disabled.dry_level, 0.9)
+        self.assertEqual(disabled.dry_level, 0.45)
         self.assertAlmostEqual(maximum.wet_level, 0.72)
-        self.assertAlmostEqual(maximum.dry_level, 0.18)
+        self.assertAlmostEqual(maximum.dry_level, 0.09)
         self.assertAlmostEqual(maximum.room_size, 0.85)
         self.assertAlmostEqual(maximum.damping, 0.35)
 
     def test_dry_and_wet_mix_always_preserves_headroom(self) -> None:
         for level in range(101):
             settings = ReverbSettings(level)
-            self.assertAlmostEqual(settings.dry_level + settings.wet_level, 0.9)
+            self.assertAlmostEqual(
+                (settings.dry_level * 2.0) + settings.wet_level,
+                0.9,
+            )
 
     def test_disabled_reverb_keeps_the_dry_audio_flowing(self) -> None:
         settings = ReverbSettings(level_percent=100, enabled=False)
 
         self.assertEqual(settings.wet_level, 0.0)
-        self.assertEqual(settings.dry_level, 0.9)
+        self.assertEqual(settings.dry_level, 0.45)
 
     def test_out_of_range_value_is_rejected(self) -> None:
         with self.assertRaises(ValueError):

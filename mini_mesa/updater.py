@@ -119,6 +119,7 @@ def download_installer(
     partial = target.with_suffix(f"{target.suffix}.part")
     digest = hashlib.sha256()
     downloaded = 0
+    completed = False
 
     try:
         download_request = request.Request(
@@ -151,6 +152,7 @@ def download_installer(
         if signature != b"MZ":
             raise UpdateError("O arquivo baixado não é um instalador do Windows.")
         os.replace(partial, target)
+        completed = True
         return target
     except UpdateError:
         raise
@@ -160,6 +162,11 @@ def download_installer(
         if partial.exists():
             try:
                 partial.unlink()
+            except OSError:
+                pass
+        if not completed:
+            try:
+                destination.rmdir()
             except OSError:
                 pass
 
@@ -249,7 +256,10 @@ def _headers(accept: str) -> dict[str, str]:
 
 
 def _version_key(version: str) -> tuple[int, ...]:
-    return tuple(int(part) for part in re.findall(r"\d+", normalize_version(version)))
+    parts = [int(part) for part in re.findall(r"\d+", normalize_version(version))]
+    while parts and parts[-1] == 0:
+        parts.pop()
+    return tuple(parts)
 
 
 def _safe_int(value) -> int:
