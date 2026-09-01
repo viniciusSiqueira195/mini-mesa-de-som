@@ -13,8 +13,8 @@ from .spatial_audio import HRTFSpatializer
 
 
 _HOST_API_RANKS = {
-    "Windows WDM-KS": 0,
-    "Windows WASAPI": 1,
+    "Windows WASAPI": 0,
+    "Windows WDM-KS": 1,
     "Windows DirectSound": 2,
     "MME": 3,
 }
@@ -329,8 +329,11 @@ class PedalboardBackend:
                             block_size=block_size,
                             processor=self._process_audio,
                         )
-                        if monitor_output is not None:
-                            stream.validate_start()
+                        # Construction alone does not prove that a Windows host
+                        # API can start the endpoint. Validate every route so an
+                        # unusable WASAPI/WDM candidate falls through to the next
+                        # compatible API before the UI reports success.
+                        stream.validate_start()
                     except Exception as exc:
                         if stream is not None:
                             stream.close()
@@ -355,7 +358,10 @@ class PedalboardBackend:
         raise RuntimeError(
             f"Não foi possível abrir o microfone '{input_device}' com a saída "
             f"'{output_device}'. Atualize os dispositivos ou escolha outra entrada. "
-            "Se o retorno estiver marcado, tente também outra saída de retorno."
+            "Feche programas que estejam usando o microfone físico e configure "
+            "o TeamTalk ou Discord para usar a ponta de gravação do cabo virtual, "
+            "não o microfone físico. Se o retorno estiver marcado, tente também "
+            "outra saída de retorno."
             f"{details}"
         )
 
@@ -734,6 +740,8 @@ class _MultiOutputSoundDeviceStream:
         self._validating = False
         self._outputs: list[_BufferedAudioOutput] = []
         self._outputs_lock = threading.Lock()
+        self._close_lock = threading.Lock()
+        self._closed = False
         self._pending_monitor: _BufferedAudioOutput | None = None
         self._monitor_output: _BufferedAudioOutput | None = None
         self._input = sounddevice.InputStream(
@@ -769,27 +777,27 @@ class _MultiOutputSoundDeviceStream:
             raise
 
     def validate_start(self) -> None:
-        """Start every device with silence so failing APIs can be skipped."""
+        """Start every device once so failing Windows APIs can be skipped."""
 
         self._validating = True
         try:
             self._input.start()
             for output in self._outputs:
                 output.stream.start()
-        finally:
+        except Exception:
             self._abort_streams()
-            for output in self._outputs:
-                output.clear()
-            self._first_audio.clear()
-            self._captured_blocks = 0
+            raise
+        finally:
             self._validating = False
 
     def run(self) -> None:
         try:
-            self._input.start()
+            if not self._input.active:
+                self._input.start()
             self._first_audio.wait(timeout=0.15)
             for output in self._outputs:
-                output.stream.start()
+                if not output.stream.active:
+                    output.stream.start()
             while (
                 self._input.active
                 and self._primary_output.stream.active
@@ -890,19 +898,23 @@ class _MultiOutputSoundDeviceStream:
             pass
 
     def _close_streams(self) -> None:
-        with self._outputs_lock:
-            outputs = tuple(self._outputs)
-            pending_monitor = self._pending_monitor
-        if pending_monitor is not None:
-            outputs = (*outputs, pending_monitor)
-        streams = [self._input, *(output.stream for output in outputs)]
-        for stream in streams:
-            try:
-                if not stream.closed:
-                    stream.abort()
-                    stream.close()
-            except Exception:
-                pass
+        with self._close_lock:
+            if self._closed:
+                return
+            self._closed = True
+            with self._outputs_lock:
+                outputs = tuple(self._outputs)
+                pending_monitor = self._pending_monitor
+            if pending_monitor is not None:
+                outputs = (*outputs, pending_monitor)
+            streams = [self._input, *(output.stream for output in outputs)]
+            for stream in streams:
+                try:
+                    if not stream.closed:
+                        stream.abort()
+                        stream.close()
+                except Exception:
+                    pass
 
     def _abort_streams(self) -> None:
         with self._outputs_lock:

@@ -23,7 +23,7 @@ if (-not (Test-Path -LiteralPath $python)) {
 Push-Location $projectRoot
 try {
     if (-not $SkipTests) {
-        & $python -m unittest discover -s tests -v
+        & $python -m pytest
         if ($LASTEXITCODE -ne 0) {
             throw "A suíte de testes falhou."
         }

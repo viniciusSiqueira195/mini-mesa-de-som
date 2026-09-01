@@ -83,14 +83,18 @@ class FakeOutputStream:
     def __init__(self) -> None:
         self.active = False
         self.closed = False
+        self.start_calls = 0
+        self.close_calls = 0
 
     def start(self) -> None:
+        self.start_calls += 1
         self.active = True
 
     def abort(self) -> None:
         self.active = False
 
     def close(self) -> None:
+        self.close_calls += 1
         self.active = False
         self.closed = True
 
@@ -264,6 +268,44 @@ class BufferedAudioOutputTests(unittest.TestCase):
         self.assertEqual(output._dropped_block_count, 1)
 
 class MultiOutputStreamTests(unittest.TestCase):
+    def test_closing_stream_twice_closes_native_devices_once(self) -> None:
+        stream = _MultiOutputSoundDeviceStream(
+            sounddevice=FakeSoundDevice(),
+            input_id=1,
+            outputs=[(2, 2)],
+            sample_rate=48_000,
+            input_channels=1,
+            block_size=4,
+            processor=lambda samples, _frames: samples,
+        )
+
+        stream.close()
+        stream.close()
+
+        self.assertEqual(stream._input.close_calls, 1)
+        self.assertEqual(stream._primary_output.stream.close_calls, 1)
+
+    def test_validated_stream_is_reused_without_restarting_devices(self) -> None:
+        stream = _MultiOutputSoundDeviceStream(
+            sounddevice=FakeSoundDevice(),
+            input_id=1,
+            outputs=[(2, 2)],
+            sample_rate=48_000,
+            input_channels=1,
+            block_size=4,
+            processor=lambda samples, _frames: samples,
+        )
+
+        stream.validate_start()
+        self.assertTrue(stream._input.active)
+        self.assertTrue(stream._primary_output.stream.active)
+
+        stream._stop_event.set()
+        stream.run()
+
+        self.assertEqual(stream._input.start_calls, 1)
+        self.assertEqual(stream._primary_output.stream.start_calls, 1)
+
     def test_only_monitor_output_receives_monitor_protections(self) -> None:
         stream = _MultiOutputSoundDeviceStream(
             sounddevice=FakeSoundDevice(),
@@ -371,8 +413,8 @@ class PedalboardProcessingTests(unittest.TestCase):
 class AudioEngineTests(unittest.TestCase):
     def test_primary_and_experimental_monitor_use_independent_api_priorities(self) -> None:
         self.assertLess(
-            _HOST_API_RANKS["Windows WDM-KS"],
             _HOST_API_RANKS["Windows WASAPI"],
+            _HOST_API_RANKS["Windows WDM-KS"],
         )
         self.assertEqual(_MONITOR_API_RANKS["Windows WASAPI"], 0)
         self.assertNotIn("Windows WDM-KS", _MONITOR_API_RANKS)

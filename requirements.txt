@@ -1,0 +1,2 @@
+# Instala o aplicativo e todas as dependências do motor declaradas no pyproject.toml.
+-e .

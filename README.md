@@ -44,8 +44,8 @@ entradas reconhecidas pelo Windows podem ser selecionadas diretamente.
   validação SHA-256 antes da instalação.
 - Buffer limitado, margem de volume e suavização de descontinuidades para evitar
   atraso crescente, saturação e estalos.
-- Preferência por WDM-KS para a rota principal, preservando o caminho estável
-  usado pelo instalador antigo.
+- Preferência por WASAPI compartilhado para coexistir com aplicativos de chamada,
+  mantendo WDM-KS, DirectSound e MME como alternativas automáticas.
 - Filas independentes: congestionamentos no retorno descartam somente a cópia
   local e não bloqueiam o áudio enviado ao cabo virtual.
 
@@ -81,7 +81,7 @@ No PowerShell, dentro da pasta do projeto:
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install -e .
+python -m pip install -r requirements.txt
 python -m mini_mesa
 ```
 
