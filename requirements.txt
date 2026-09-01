@@ -1,0 +1,11 @@
+# Dependências principais do projeto Mini Mesa de Som
+numpy>=2,<3
+pedalboard>=0.9.24,<1
+pyrnnoise==0.4.3
+sounddevice>=0.5.3,<1
+soundfile>=0.12,<1
+wxPython>=4.2.3,<5
+
+# Dependências de desenvolvimento e build (opcionais)
+# pytest
+# pyinstaller==6.22.2

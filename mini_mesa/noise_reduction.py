@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes
+import threading
 from collections.abc import Callable
 from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
@@ -68,12 +69,14 @@ class RNNoiseReducer:
         self._library.rnnoise_create.argtypes = [ctypes.c_void_p]
         self._library.rnnoise_create.restype = ctypes.c_void_p
         self._library.rnnoise_destroy.argtypes = [ctypes.c_void_p]
+        self._library.rnnoise_destroy.restype = None
         self._library.rnnoise_process_frame.argtypes = [
             ctypes.c_void_p,
             ctypes.POINTER(ctypes.c_float),
             ctypes.POINTER(ctypes.c_float),
         ]
         self._library.rnnoise_process_frame.restype = ctypes.c_float
+        self._library.rnnoise_get_frame_size.argtypes = []
         self._library.rnnoise_get_frame_size.restype = ctypes.c_int
 
         frame_size = int(self._library.rnnoise_get_frame_size())
@@ -86,6 +89,7 @@ class RNNoiseReducer:
             raise NoiseReductionDependencyError(
                 "O RNNoise não conseguiu criar o estado de processamento."
             )
+        self._state_lock = threading.Lock()
         self._stream = StreamingNoiseReducer(self._process_frame)
 
     @staticmethod
@@ -113,14 +117,22 @@ class RNNoiseReducer:
             dtype=np.float32,
         )
         pointer = native_frame.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
-        self._library.rnnoise_process_frame(self._state, pointer, pointer)
+        with self._state_lock:
+            state = self._state
+            if not state:
+                raise RuntimeError("A redução de ruído já foi encerrada.")
+            self._library.rnnoise_process_frame(state, pointer, pointer)
         return np.clip(native_frame / 32_767.0, -1.0, 1.0)
 
     def close(self) -> None:
-        state = self._state
-        if state:
-            self._state = None
-            self._library.rnnoise_destroy(state)
+        state_lock = getattr(self, "_state_lock", None)
+        if state_lock is None:
+            return
+        with state_lock:
+            state = self._state
+            if state:
+                self._state = None
+                self._library.rnnoise_destroy(state)
 
     def __del__(self) -> None:
         try:

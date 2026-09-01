@@ -34,6 +34,13 @@ entradas reconhecidas pelo Windows podem ser selecionadas diretamente.
 - Interface nativa acessível com NVDA e operação completa pelo teclado.
 - Seleção independente do microfone, cabo virtual e dispositivo de retorno.
 - Reverb ajustado por um único controle simples de 0 a 100.
+- Modificador de voz com presets de pitch, harmonização, auto-tune e vocoder.
+- Efeitos criativos, modulações, ambientes e controles de intensidade com
+  bypass real em 0%.
+- Compressor, equalizador, noise gate, de-esser, expander, ganho automático e
+  filtro de plosivas.
+- Soundboard com quatro vinhetas internas, arquivo personalizado, volume e
+  ducking durante a fala.
 - Redução neural de ruído RNNoise, opcional e executada localmente.
 - Áudio espacial binaural com HRTF real e posição horizontal de −180° a +180°.
 - Reverb e redução de ruído utilizáveis separadamente ou em conjunto.
@@ -54,8 +61,10 @@ entradas reconhecidas pelo Windows podem ser selecionadas diretamente.
 ```text
 Microfone físico
     -> redução de ruído opcional
+    -> modificador e efeitos de voz opcionais
     -> reverb opcional
     -> HRTF binaural opcional
+    -> soundboard / vinheta limpa
     -> limitador
     -> cabo de áudio virtual
     -> Discord, TeamTalk, WhatsApp ou outro aplicativo
@@ -179,10 +188,10 @@ a mesa está funcionando.
 
 ### Redução de ruído
 
-O RNNoise reduz ruídos de fundo antes do reverb e não envia áudio para a
+O RNNoise reduz ruídos de fundo antes dos efeitos e não envia áudio para a
 internet. A opção fica desmarcada por padrão, requer processamento em 48 kHz e
-adiciona um quadro fixo de 10 milissegundos. Para preservar a continuidade do
-áudio, altere essa opção com a mesa desativada.
+adiciona um quadro fixo de 10 milissegundos. Quando essa opção é alterada com a
+mesa ativa, a rota é reiniciada de forma controlada para renegociar a taxa.
 
 ### Áudio espacial binaural
 
@@ -212,6 +221,8 @@ para avaliá-lo ou use o retorno experimental.
 - `Alt+A`: ativar ou desativar a mesa.
 - `Alt+C`: encerrar o programa.
 - `F5`: atualizar os dispositivos.
+- `F1` a `F4`: reproduzir as quatro vinhetas internas.
+- `F6`: escolher uma vinheta de áudio personalizada.
 - `Alt+J`, depois `A`: abrir Ajuda e verificar atualizações.
 
 ## Preferências
@@ -258,6 +269,7 @@ microfones físicos.
 - `mini_mesa/audio_engine.py`: dispositivos, ciclo da transmissão e cadeia DSP.
 - `mini_mesa/noise_reduction.py`: adaptação de streaming e RNNoise nativo.
 - `mini_mesa/spatial_audio.py`: convolução binaural, interpolação e transições.
+- `mini_mesa/soundboard.py`: síntese, carregamento e reprodução das vinhetas.
 - `mini_mesa/preferences.py`: persistência JSON atômica.
 - `mini_mesa/settings.py`: mapeamento seguro dos controles de efeito.
 - `tests/`: testes automatizados do motor e das configurações.

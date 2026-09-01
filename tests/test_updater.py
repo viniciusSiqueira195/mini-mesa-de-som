@@ -15,6 +15,8 @@ class UpdaterTests(unittest.TestCase):
     def test_versions_are_compared_numerically(self) -> None:
         self.assertTrue(updater.is_newer_version("v0.10.0", "0.9.9"))
         self.assertFalse(updater.is_newer_version("v0.1.0", "0.1.0"))
+        self.assertFalse(updater.is_newer_version("1.0.0", "1.0"))
+        self.assertFalse(updater.is_newer_version("1.0", "1.0.0"))
 
     def test_latest_release_requires_matching_installer_and_checksum(self) -> None:
         payload = {
