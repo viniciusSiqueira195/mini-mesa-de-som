@@ -20,6 +20,7 @@ from mini_mesa.audio_engine import (
     match_device_label,
 )
 from mini_mesa.settings import ReverbSettings, SpatialSettings
+from mini_mesa.soundboard import SoundEffectInfo
 
 
 class FakeStream:
@@ -38,6 +39,18 @@ class FakeStream:
         self.closed.set()
 
 
+class SilentSoundboard:
+    @staticmethod
+    def mix(frames: int) -> np.ndarray:
+        return np.zeros((frames, 2), dtype=np.float32)
+
+
+class ConstantSoundboard:
+    @staticmethod
+    def mix(frames: int) -> np.ndarray:
+        return np.full((frames, 2), 0.25, dtype=np.float32)
+
+
 class FakeBackend:
     def __init__(self, stream: FakeStream | None = None) -> None:
         self.stream = stream or FakeStream()
@@ -46,6 +59,8 @@ class FakeBackend:
         self.updated_monitors: list[str | None] = []
         self.noise_reduction_enabled = False
         self.spatial_settings = SpatialSettings()
+        self.played_effects: list[str] = []
+        self.effects_stopped = 0
 
     def input_devices(self) -> tuple[str, ...]:
         return ("FIFINE AM8", "Zeus X")
@@ -77,6 +92,16 @@ class FakeBackend:
 
     def update_spatial(self, settings: SpatialSettings) -> None:
         self.spatial_settings = settings
+
+    def sound_effects(self) -> tuple[SoundEffectInfo, ...]:
+        return (SoundEffectInfo("horn", "Buzina", "Ctrl+1", "Buzina curta"),)
+
+    def play_sound_effect(self, effect_id: str) -> SoundEffectInfo:
+        self.played_effects.append(effect_id)
+        return self.sound_effects()[0]
+
+    def stop_sound_effects(self) -> None:
+        self.effects_stopped += 1
 
 
 class FakeOutputStream:
@@ -402,12 +427,73 @@ class PedalboardProcessingTests(unittest.TestCase):
         backend._limiter = None
         backend._sample_rate = 48_000.0
         backend._processing_lock = threading.Lock()
+        backend._soundboard = SilentSoundboard()
         microphone = np.full((4, 1), 0.8, dtype=np.float32)
 
         output = backend._process_audio(microphone, 4)
 
         np.testing.assert_allclose(effects.received, np.full((1, 4), 0.4))
         np.testing.assert_allclose(output, np.full((4, 2), 0.4))
+
+    def test_soundboard_is_mixed_with_processed_microphone_audio(self) -> None:
+        class PassthroughEffects:
+            @staticmethod
+            def process(samples, _sample_rate, **_kwargs):
+                return samples
+
+        backend = object.__new__(PedalboardBackend)
+        backend._np = np
+        backend._effects = PassthroughEffects()
+        backend._noise_reducer = None
+        backend._spatializer = None
+        backend._limiter = None
+        backend._sample_rate = 48_000.0
+        backend._processing_lock = threading.Lock()
+        backend._soundboard = ConstantSoundboard()
+
+        output = backend._process_audio(
+            np.full((4, 1), 0.20, dtype=np.float32),
+            4,
+        )
+
+        np.testing.assert_allclose(output, np.full((4, 2), 0.45))
+
+    def test_soundboard_follows_reverb_and_spatial_processing(self) -> None:
+        class RecordingReverb:
+            received = None
+
+            def process(self, samples, _sample_rate, **_kwargs):
+                self.received = samples.copy()
+                return samples * 2.0
+
+        class RecordingSpatializer:
+            received = None
+
+            def process(self, samples):
+                self.received = samples.copy()
+                return np.column_stack((samples, samples * 3.0))
+
+        reverb = RecordingReverb()
+        spatializer = RecordingSpatializer()
+        backend = object.__new__(PedalboardBackend)
+        backend._np = np
+        backend._effects = reverb
+        backend._noise_reducer = None
+        backend._spatializer = spatializer
+        backend._limiter = None
+        backend._sample_rate = 48_000.0
+        backend._processing_lock = threading.Lock()
+        backend._soundboard = ConstantSoundboard()
+
+        output = backend._process_audio(
+            np.full((4, 1), 0.20, dtype=np.float32),
+            4,
+        )
+
+        np.testing.assert_allclose(reverb.received, np.full((1, 4), 0.45))
+        np.testing.assert_allclose(spatializer.received, np.full(4, 0.90))
+        np.testing.assert_allclose(output[:, 0], np.full(4, 0.90))
+        np.testing.assert_allclose(output[:, 1], np.full(4, 2.70))
 
 
 class AudioEngineTests(unittest.TestCase):
@@ -631,6 +717,25 @@ class AudioEngineTests(unittest.TestCase):
         self.assertEqual(backend.spatial_settings, settings)
         self.assertTrue(engine.is_running)
         engine.stop()
+
+    def test_sound_effect_requires_an_active_audio_route(self) -> None:
+        engine = AudioEngine(FakeBackend())
+
+        with self.assertRaisesRegex(RuntimeError, "Ative a mesa"):
+            engine.play_sound_effect("horn")
+
+    def test_sound_effect_reaches_backend_and_stops_with_the_route(self) -> None:
+        backend = FakeBackend()
+        engine = AudioEngine(backend)
+        engine.start("Zeus X", "CABLE Input")
+        self.assertTrue(backend.stream.started.wait(timeout=1))
+
+        effect = engine.play_sound_effect("horn")
+        engine.stop()
+
+        self.assertEqual(effect.name, "Buzina")
+        self.assertEqual(backend.played_effects, ["horn"])
+        self.assertGreaterEqual(backend.effects_stopped, 1)
 
     def test_monitor_and_virtual_output_must_be_different(self) -> None:
         engine = AudioEngine(FakeBackend())

@@ -66,6 +66,71 @@ class SystemTrayIcon(wx.adv.TaskBarIcon):
         self._frame.exit_from_tray()
 
 
+class SoundboardDialog(wx.Dialog):
+    """Keyboard-first effect picker kept separate from the main mixer UI."""
+
+    def __init__(self, parent: MainFrame) -> None:
+        super().__init__(parent, title="Efeitos sonoros", size=(480, 360))
+        self._frame = parent
+        self._effects = parent.engine.sound_effects()
+
+        root = wx.BoxSizer(wx.VERTICAL)
+        instructions = wx.StaticText(
+            self,
+            label=(
+                "Escolha um efeito. Enter reproduz, Espaço interrompe todos e "
+                "Escape fecha esta janela."
+            ),
+        )
+        instructions.Wrap(430)
+        root.Add(instructions, 0, wx.ALL | wx.EXPAND, 12)
+
+        self.effect_list = wx.ListBox(
+            self,
+            choices=[
+                f"{effect.name}; {effect.description}; atalho {effect.shortcut}"
+                for effect in self._effects
+            ],
+        )
+        self.effect_list.SetName("Lista de efeitos sonoros")
+        if self._effects:
+            self.effect_list.SetSelection(0)
+        self.effect_list.Bind(wx.EVT_LISTBOX_DCLICK, self._on_play)
+        self.effect_list.Bind(wx.EVT_KEY_DOWN, self._on_key_down)
+        root.Add(self.effect_list, 1, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
+
+        actions = wx.BoxSizer(wx.HORIZONTAL)
+        play_button = wx.Button(self, label="&Reproduzir")
+        play_button.Bind(wx.EVT_BUTTON, self._on_play)
+        actions.Add(play_button, 1, wx.RIGHT | wx.EXPAND, 5)
+        stop_button = wx.Button(self, label="&Parar todos")
+        stop_button.Bind(wx.EVT_BUTTON, self._on_stop)
+        actions.Add(stop_button, 1, wx.LEFT | wx.RIGHT | wx.EXPAND, 5)
+        close_button = wx.Button(self, wx.ID_CANCEL, "&Fechar")
+        actions.Add(close_button, 1, wx.LEFT | wx.EXPAND, 5)
+        root.Add(actions, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
+
+        self.SetSizer(root)
+        self.effect_list.SetFocus()
+
+    def _on_play(self, _event: wx.Event) -> None:
+        selection = self.effect_list.GetSelection()
+        if selection != wx.NOT_FOUND:
+            self._frame.play_sound_effect(self._effects[selection].effect_id)
+
+    def _on_stop(self, _event: wx.Event) -> None:
+        self._frame.stop_sound_effects()
+
+    def _on_key_down(self, event: wx.KeyEvent) -> None:
+        if event.GetKeyCode() in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER):
+            self._on_play(event)
+            return
+        if event.GetKeyCode() == wx.WXK_SPACE:
+            self._on_stop(event)
+            return
+        event.Skip()
+
+
 class MainFrame(wx.Frame):
     def __init__(
         self,
@@ -280,15 +345,54 @@ class MainFrame(wx.Frame):
         self.SetStatusText("F5 atualiza a lista de dispositivos.")
 
         menu_bar = wx.MenuBar()
+        effects_menu = wx.Menu()
+        self._open_soundboard_id = wx.NewIdRef()
+        self._stop_effects_id = wx.NewIdRef()
+        effects_menu.Append(
+            self._open_soundboard_id,
+            "&Abrir soundboard\tCtrl+Shift+E",
+        )
+        effects_menu.AppendSeparator()
+        self._effect_menu_ids: dict[int, str] = {}
+        for number, effect in enumerate(self.engine.sound_effects(), start=1):
+            menu_id = wx.NewIdRef()
+            effects_menu.Append(menu_id, f"{effect.name}\tCtrl+{number}")
+            self._effect_menu_ids[int(menu_id)] = effect.effect_id
+            self.Bind(
+                wx.EVT_MENU,
+                lambda _event, effect_id=effect.effect_id: self.play_sound_effect(
+                    effect_id
+                ),
+                id=menu_id,
+            )
+        effects_menu.AppendSeparator()
+        effects_menu.Append(self._stop_effects_id, "&Parar todos\tCtrl+0")
+        menu_bar.Append(effects_menu, "E&feitos")
+
         help_menu = wx.Menu()
         self._check_updates_id = wx.NewIdRef()
         help_menu.Append(self._check_updates_id, "Verificar &atualizações")
         menu_bar.Append(help_menu, "A&juda")
         self.SetMenuBar(menu_bar)
 
-        accelerator = wx.AcceleratorTable([(wx.ACCEL_NORMAL, wx.WXK_F5, wx.ID_REFRESH)])
+        accelerators = [
+            (wx.ACCEL_NORMAL, wx.WXK_F5, wx.ID_REFRESH),
+            (wx.ACCEL_CTRL | wx.ACCEL_SHIFT, ord("E"), self._open_soundboard_id),
+            (wx.ACCEL_CTRL, ord("0"), self._stop_effects_id),
+        ]
+        accelerators.extend(
+            (wx.ACCEL_CTRL, ord(str(number)), menu_id)
+            for number, menu_id in enumerate(self._effect_menu_ids, start=1)
+        )
+        accelerator = wx.AcceleratorTable(accelerators)
         self.SetAcceleratorTable(accelerator)
         self.Bind(wx.EVT_MENU, self._on_refresh, id=wx.ID_REFRESH)
+        self.Bind(
+            wx.EVT_MENU,
+            self._on_open_soundboard,
+            id=self._open_soundboard_id,
+        )
+        self.Bind(wx.EVT_MENU, self._on_stop_effects, id=self._stop_effects_id)
         self.Bind(
             wx.EVT_MENU,
             self._on_check_for_updates,
@@ -309,6 +413,28 @@ class MainFrame(wx.Frame):
 
     def _on_check_for_updates(self, _event: wx.Event) -> None:
         self._start_update_check(True)
+
+    def _on_open_soundboard(self, _event: wx.Event) -> None:
+        dialog = SoundboardDialog(self)
+        try:
+            dialog.ShowModal()
+        finally:
+            dialog.Destroy()
+
+    def play_sound_effect(self, effect_id: str) -> None:
+        try:
+            effect = self.engine.play_sound_effect(effect_id)
+        except Exception as exc:
+            self._show_error(str(exc))
+            return
+        self.SetStatusText(f"Efeito reproduzido: {effect.name}.")
+
+    def stop_sound_effects(self) -> None:
+        self.engine.stop_sound_effects()
+        self.SetStatusText("Todos os efeitos sonoros foram interrompidos.")
+
+    def _on_stop_effects(self, _event: wx.Event) -> None:
+        self.stop_sound_effects()
 
     def _start_update_check(self, manual: bool) -> None:
         if self._update_check_in_progress:

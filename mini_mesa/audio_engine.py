@@ -9,6 +9,7 @@ from typing import Protocol
 
 from .noise_reduction import RNNOISE_SAMPLE_RATE, RNNoiseReducer
 from .settings import ReverbSettings, SpatialSettings
+from .soundboard import SoundboardMixer, SoundEffectInfo
 from .spatial_audio import HRTFSpatializer
 
 
@@ -153,6 +154,12 @@ class AudioBackend(Protocol):
 
     def update_spatial(self, settings: SpatialSettings) -> None: ...
 
+    def sound_effects(self) -> Sequence[SoundEffectInfo]: ...
+
+    def play_sound_effect(self, effect_id: str) -> SoundEffectInfo: ...
+
+    def stop_sound_effects(self) -> None: ...
+
 
 class PedalboardBackend:
     """PortAudio routing with native DSP powered by Spotify's Pedalboard."""
@@ -183,6 +190,7 @@ class PedalboardBackend:
         self._noise_reducer: RNNoiseReducer | None = None
         self._processing_lock = threading.Lock()
         self._sample_rate = 48_000.0
+        self._soundboard = SoundboardMixer()
         self._input_ids: dict[str, list[tuple[int, str]]] = {}
         self._output_ids: dict[str, list[tuple[int, str]]] = {}
 
@@ -459,8 +467,15 @@ class PedalboardBackend:
             mono_input = self._np.mean(indata, axis=1, dtype=self._np.float32)
             if self._noise_reducer is not None:
                 mono_input = self._noise_reducer.process(mono_input)
+            soundboard = self._soundboard.mix(frames)
+            soundboard_mono = self._np.mean(
+                soundboard,
+                axis=1,
+                dtype=self._np.float32,
+            )
+            combined_input = mono_input + soundboard_mono
             reverberated = self._effects.process(
-                mono_input[self._np.newaxis, :],
+                combined_input[self._np.newaxis, :],
                 self._sample_rate,
                 buffer_size=frames,
                 reset=False,
@@ -504,6 +519,15 @@ class PedalboardBackend:
             self._spatial_settings = settings
             if self._spatializer is not None:
                 self._spatializer.update(settings)
+
+    def sound_effects(self) -> Sequence[SoundEffectInfo]:
+        return self._soundboard.effects()
+
+    def play_sound_effect(self, effect_id: str) -> SoundEffectInfo:
+        return self._soundboard.trigger(effect_id, self._sample_rate)
+
+    def stop_sound_effects(self) -> None:
+        self._soundboard.stop_all()
 
     def _replace_noise_reducer(self) -> None:
         previous = self._noise_reducer
@@ -1063,6 +1087,19 @@ class AudioEngine:
             self._spatial_settings = settings
             self._backend.update_spatial(settings)
 
+    def sound_effects(self) -> tuple[SoundEffectInfo, ...]:
+        return tuple(self._backend.sound_effects())
+
+    def play_sound_effect(self, effect_id: str) -> SoundEffectInfo:
+        with self._lock:
+            if self._stream is None:
+                raise RuntimeError("Ative a mesa antes de reproduzir um efeito.")
+            return self._backend.play_sound_effect(effect_id)
+
+    def stop_sound_effects(self) -> None:
+        with self._lock:
+            self._backend.stop_sound_effects()
+
     def stop(self, *, timeout: float = 2.0) -> None:
         with self._lock:
             stream = self._stream
@@ -1072,6 +1109,7 @@ class AudioEngine:
             self._stopping = True
 
         try:
+            self._backend.stop_sound_effects()
             stream.close()
         finally:
             if thread is not None and thread is not threading.current_thread():
@@ -1092,6 +1130,7 @@ class AudioEngine:
         except Exception as exc:  # Native audio errors must reach the UI safely.
             error = exc
         finally:
+            self._backend.stop_sound_effects()
             with self._lock:
                 expected_stop = self._stopping
                 if self._stream is stream:

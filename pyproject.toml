@@ -28,4 +28,9 @@ where = ["."]
 include = ["mini_mesa*"]
 
 [tool.setuptools.package-data]
-mini_mesa = ["assets/hrtf/mit_kemar/*.wav", "assets/hrtf/mit_kemar/NOTICE.txt"]
+mini_mesa = [
+    "assets/hrtf/mit_kemar/*.wav",
+    "assets/hrtf/mit_kemar/NOTICE.txt",
+    "assets/sounds/*.wav",
+    "assets/sounds/NOTICE.txt",
+]

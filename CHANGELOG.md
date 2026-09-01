@@ -5,6 +5,9 @@
 - Posicionamento binaural 3D por coordenadas X, Y e Z.
 - Movimento espacial automático por frente, direita, trás, esquerda, cima e baixo.
 - Controle acessível de velocidade e migração das preferências horizontais antigas.
+- Soundboard acessível com cinco efeitos simultâneos, atalhos de teclado e mistura na rota virtual.
+- Pacote pessoal com pistola, metralhadora, palmas, air horn de DJ limitada a quatro segundos e locução de Mano Brown.
+- Soundboard inserido antes do reverb e do áudio espacial para acompanhar o estado da mesa.
 - Descoberta renovada de dispositivos e preferência por WASAPI compartilhado.
 
 ## 0.1.0 — 2026-08-27

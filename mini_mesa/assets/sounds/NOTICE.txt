@@ -1,0 +1,14 @@
+Mini Mesa de Som soundboard fallback asset
+==========================================
+
+applause.wav
+------------
+Adapted from "APPLAUSE" by SamuelGremaud on Freesound:
+https://freesound.org/people/SamuelGremaud/sounds/455154/
+
+The source is dedicated to the public domain under Creative Commons Zero 1.0:
+https://creativecommons.org/publicdomain/zero/1.0/
+
+The included version was trimmed, resampled to 48 kHz, faded and normalized.
+All other soundboard recordings are personal files stored outside the Git
+repository and are documented in tools/PERSONAL_SOUND_PACK_NOTICE.txt.

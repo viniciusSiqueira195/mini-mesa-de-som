@@ -1,0 +1,43 @@
+Mini Mesa de Som - pacote pessoal de efeitos
+=============================================
+
+Estes arquivos não são distribuídos com o aplicativo nem versionados no Git.
+Eles foram instalados localmente para uso pessoal e não comercial.
+
+Pistola (pistol.wav)
+--------------------
+"Handgun Shot Sound", por Alexander / Orange Free Sounds:
+https://orangefreesounds.com/handgun-shot-sound/
+
+Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0).
+
+Metralhadora (machine_gun.wav)
+------------------------------
+"Machine Gun Rapid Fire Sound Effect", por Alexander / Orange Free Sounds:
+https://orangefreesounds.com/machine-gun-rapid-fire-sound-effect/
+
+Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0).
+
+Buzina de DJ (dj_horn.wav)
+--------------------------
+"DJ Airhorn Sound Effect", por Alexander / Orange Free Sounds:
+https://orangefreesounds.com/dj-airhorn-sound-effect/
+
+Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0).
+O arquivo local é limitado aos quatro primeiros segundos e recebe fade de saída.
+
+Palmas (applause.wav)
+---------------------
+"End of show clapping crowd", Mixkit:
+https://mixkit.co/free-sound-effects/applause/
+
+Uso sob a licença gratuita de efeitos sonoros do Mixkit.
+
+Sensacional! - Mano Brown (sensational_brown.wav)
+-------------------------------------------------
+Upload "Sensacional!" no Myinstants, identificado como trecho de Mano Brown em
+"1 Por Amor, 2 Por Dinheiro":
+https://www.myinstants.com/pt/instant/sensacional/
+
+O site não declara licença para o upload. Mantido apenas localmente para uso
+pessoal; não redistribuir.

@@ -36,6 +36,7 @@ entradas reconhecidas pelo Windows podem ser selecionadas diretamente.
 - Reverb ajustado por um único controle simples de 0 a 100.
 - Redução neural de ruído RNNoise, opcional e executada localmente.
 - Áudio espacial binaural 3D por coordenadas X, Y e Z, com movimento automático.
+- Soundboard acessível com tiro, palmas, fala e buzina misturados na rota virtual.
 - Reverb e redução de ruído utilizáveis separadamente ou em conjunto.
 - Retorno local experimental, mantido aberto para testes e contribuições.
 - Minimização para a bandeja do sistema sem interromper o áudio.
@@ -60,6 +61,9 @@ Microfone físico
     -> cabo de áudio virtual
     -> Discord, TeamTalk, WhatsApp ou outro aplicativo
 ```
+
+Os efeitos do soundboard entram na mesma rota antes do limitador. Eles chegam ao
+aplicativo de conversa e ao retorno sem abrir outro dispositivo de áudio.
 
 Quando **Ouvir retorno** está marcado, uma cópia do áudio processado também
 segue para o fone escolhido. Use fones de ouvido para evitar microfonia. Esse
@@ -202,6 +206,25 @@ ouvinte. Aplicativos de conversa que transformem o microfone em mono eliminarão
 boa parte ou todo o efeito. Faça uma gravação estéreo no aplicativo de destino
 para avaliá-lo ou use o retorno experimental.
 
+### Soundboard acessível
+
+O menu **Efeitos** abre uma janela separada para não ocupar a interface principal.
+Use as setas para escolher um som, `Enter` para reproduzir, `Espaço` para parar
+todos e `Escape` para fechar. Os atalhos diretos funcionam com a janela fechada,
+desde que a Mini Mesa esteja em foco e ativa.
+
+Os efeitos podem tocar simultaneamente e entram na mesma cadeia da voz. Portanto,
+reverb e áudio espacial 3D ativos também processam todos os sons do soundboard.
+
+O pacote pessoal instalado neste computador oferece um tiro de pistola, uma
+rajada de metralhadora, palmas, uma air horn de DJ com quatro segundos e a frase
+"Sensacional!" de Mano Brown. Esses arquivos ficam em
+`%APPDATA%\Mini Mesa de Som Teste\sounds`, fora do Git e disponíveis sem internet.
+As palmas vêm do Mixkit, o tiro e a air horn vêm do Orange Free Sounds e a voz
+foi obtida no Myinstants. O pacote é usado apenas para diversão pessoal e não é
+distribuído junto com o programa. A procedência completa fica registrada em
+`tools/PERSONAL_SOUND_PACK_NOTICE.txt`.
+
 ## Atalhos
 
 - `Alt+M`: escolher o microfone.
@@ -215,6 +238,13 @@ para avaliá-lo ou use o retorno experimental.
 - `Alt+X`, `Alt+Y` e `Alt+Z`: ajustar as coordenadas espaciais.
 - `Alt+U`: ativar ou desativar o movimento automático.
 - `Alt+V`: ajustar a velocidade do movimento espacial.
+- `Ctrl+Shift+E`: abrir o soundboard acessível.
+- `Ctrl+1`: reproduzir pistola.
+- `Ctrl+2`: reproduzir metralhadora.
+- `Ctrl+3`: reproduzir palmas.
+- `Ctrl+4`: reproduzir buzina de DJ por até quatro segundos.
+- `Ctrl+5`: reproduzir "Sensacional!" de Mano Brown.
+- `Ctrl+0`: interromper todos os efeitos.
 - `Alt+A`: ativar ou desativar a mesa.
 - `Alt+C`: encerrar o programa.
 - `F5`: atualizar os dispositivos.
