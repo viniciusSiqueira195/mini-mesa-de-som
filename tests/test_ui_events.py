@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import types
+import tempfile
 import unittest
 from unittest.mock import patch
+from pathlib import Path
 
 from mini_mesa import ui
 
@@ -66,6 +68,41 @@ class CreativeChoiceEventTests(unittest.TestCase):
         queued[0]()
         self.assertEqual(applied, ["applied"])
 
+
+class HelpContentTests(unittest.TestCase):
+    def test_f1_help_inherits_project_shortcuts_and_credits_from_readme(self) -> None:
+        help_text = ui._load_project_help()
+
+        for expected in (
+            "Mini Mesa de Som",
+            "F1",
+            "Ctrl+Shift+E",
+            "Paulo Santesso",
+            "paulosantesso1",
+            "viniciusSiqueira195",
+        ):
+            self.assertIn(expected, help_text)
+
+    def test_markdown_is_simplified_for_screen_readers(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            readme = Path(directory) / "README.md"
+            readme.write_text(
+                "# Ajuda\n\n- Use `F1`.\n[Projeto](https://example.com)",
+                encoding="utf-8",
+            )
+
+            help_text = ui._load_project_help(readme)
+
+        self.assertEqual(
+            help_text,
+            "Ajuda\n\n• Use F1.\nProjeto — https://example.com",
+        )
+
+    def test_missing_readme_has_an_actionable_fallback(self) -> None:
+        help_text = ui._load_project_help(Path("missing-readme-for-test.md"))
+
+        self.assertIn("documentação completa não foi encontrada", help_text)
+        self.assertIn("github.com", help_text)
 
 if __name__ == "__main__":
     unittest.main()

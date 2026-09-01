@@ -2,6 +2,7 @@ from PyInstaller.utils.hooks import collect_all, collect_data_files, copy_metada
 
 
 datas = collect_data_files("mini_mesa")
+datas.append(("README.md", "."))
 binaries = []
 hiddenimports = []
 

@@ -16,8 +16,8 @@ Baixe `MiniMesaDeSom-Setup-0.1.0.exe` na página da
 e execute o instalador. Ele pode instalar opcionalmente o VB-CABLE oficial,
 necessário para enviar o áudio processado ao TeamTalk, Discord ou outro programa.
 
-Na primeira abertura, uma mensagem acessível explica o fluxo básico e como
-configurar as duas pontas do cabo virtual.
+Na primeira abertura, uma mensagem acessível explica o fluxo básico, como
+configurar as duas pontas do cabo virtual e que `F1` abre a ajuda completa.
 
 ## Por que este projeto existe
 
@@ -257,7 +257,8 @@ distribuído junto com o programa. A procedência completa fica registrada em
 - `Alt+A`: ativar ou desativar a mesa.
 - `Alt+C`: encerrar o programa.
 - `F5`: atualizar os dispositivos.
-- `F1`: reproduzir pistola; `F2`: metralhadora; `F3`: palmas; `F4`: buzina de DJ.
+- `F1`: abrir a ajuda acessível com apresentação, atalhos e créditos.
+- `F2`: reproduzir metralhadora; `F3`: palmas; `F4`: buzina de DJ.
 - `F6`: escolher uma vinheta de áudio personalizada.
 - `Alt+J`, depois `A`: abrir Ajuda e verificar atualizações.
 
@@ -324,6 +325,11 @@ dados HRTF e o VB-CABLE permanecem sujeitos às licenças de seus respectivos
 autores. Consulte [LICENSE](LICENSE) e os avisos incluídos no projeto.
 
 ## Créditos técnicos
+
+Desenvolvido originalmente por [Vinicius Siqueira](https://github.com/viniciusSiqueira195).
+Colaboração de [Paulo Santesso](https://github.com/paulosantesso1), responsável
+por melhorias no motor de áudio em tempo real, efeitos de voz, controles
+profissionais e atualizador.
 
 - [Pedalboard](https://github.com/spotify/pedalboard), usado para reverb e
   limitação.

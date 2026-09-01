@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import re
 import threading
 from dataclasses import replace
+from pathlib import Path
 
 import wx
 import wx.adv
@@ -25,6 +27,44 @@ from .updater import (
     download_installer,
     launch_installer,
 )
+
+_PROJECT_URL = "https://github.com/viniciusSiqueira195/mini-mesa-de-som"
+_PAULO_URL = "https://github.com/paulosantesso1"
+_HELP_FALLBACK = (
+    "Mini Mesa de Som\n\n"
+    "A documentação completa não foi encontrada. Pressione F1 novamente após "
+    "reinstalar o programa ou consulte o projeto em:\n"
+    f"{_PROJECT_URL}"
+)
+
+
+def _markdown_to_accessible_text(markdown: str) -> str:
+    """Remove visual Markdown markers while retaining labels and destinations."""
+
+    text = re.sub(r"\[([^\]]+)]\(([^)]+)\)", r"\1 — \2", markdown)
+    text = re.sub(r"`([^`]+)`", r"\1", text)
+    text = text.replace("**", "").replace("__", "")
+    lines: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            continue
+        line = re.sub(r"^\s{0,3}#{1,6}\s+", "", line)
+        line = re.sub(r"^\s*>\s?", "", line)
+        line = re.sub(r"^\s*-\s+", "• ", line)
+        lines.append(line.rstrip())
+    return "\n".join(lines).strip()
+
+
+def _load_project_help(readme_path: Path | None = None) -> str:
+    """Load the README used by source runs and bundled Windows builds."""
+
+    path = readme_path or Path(__file__).resolve().parent.parent / "README.md"
+    try:
+        markdown = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return _HELP_FALLBACK
+    return _markdown_to_accessible_text(markdown) or _HELP_FALLBACK
 
 _VOICE_PRESETS = (
     ("female", "Voz feminina (+4 semitons)", 4),
@@ -257,6 +297,48 @@ class SoundboardDialog(wx.Dialog):
             self._on_stop(event)
             return
         event.Skip()
+
+
+class HelpDialog(wx.Dialog):
+    """Accessible README viewer opened with F1."""
+
+    def __init__(self, parent: MainFrame) -> None:
+        super().__init__(parent, title="Ajuda da Mini Mesa de Som", size=(700, 620))
+        root = wx.BoxSizer(wx.VERTICAL)
+        instructions = wx.StaticText(
+            self,
+            label=(
+                "Documentação completa do projeto. Use as setas para ler, "
+                "Page Up e Page Down para navegar, Home para o início e End "
+                "para o final."
+            ),
+        )
+        root.Add(instructions, 0, wx.ALL | wx.EXPAND, 10)
+        self.help_text = wx.TextCtrl(
+            self,
+            value=_load_project_help(),
+            style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_RICH2,
+        )
+        self.help_text.SetName("Documentação da Mini Mesa de Som")
+        self.help_text.SetInsertionPoint(0)
+        root.Add(self.help_text, 1, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 10)
+
+        actions = wx.BoxSizer(wx.HORIZONTAL)
+        project_button = wx.Button(self, label="Abrir &projeto no GitHub")
+        project_button.Bind(
+            wx.EVT_BUTTON, lambda _event: wx.LaunchDefaultBrowser(_PROJECT_URL)
+        )
+        actions.Add(project_button, 1, wx.RIGHT | wx.EXPAND, 5)
+        paulo_button = wx.Button(self, label="Abrir GitHub de P&aulo Santesso")
+        paulo_button.Bind(
+            wx.EVT_BUTTON, lambda _event: wx.LaunchDefaultBrowser(_PAULO_URL)
+        )
+        actions.Add(paulo_button, 1, wx.LEFT | wx.RIGHT | wx.EXPAND, 5)
+        close_button = wx.Button(self, wx.ID_CANCEL, "&Fechar")
+        actions.Add(close_button, 1, wx.LEFT | wx.EXPAND, 5)
+        root.Add(actions, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 10)
+        self.SetSizer(root)
+        self.help_text.SetFocus()
 
 
 class MainFrame(wx.Frame):
@@ -771,19 +853,21 @@ class MainFrame(wx.Frame):
         menu_bar.Append(effects_menu, "E&feitos")
 
         help_menu = wx.Menu()
+        self._project_help_id = wx.NewIdRef()
         self._check_updates_id = wx.NewIdRef()
+        help_menu.Append(self._project_help_id, "&Ajuda do projeto\tF1")
+        help_menu.AppendSeparator()
         help_menu.Append(self._check_updates_id, "Verificar &atualizações")
         menu_bar.Append(help_menu, "A&juda")
         self.SetMenuBar(menu_bar)
 
-        self._id_f1 = wx.NewIdRef()
         self._id_f2 = wx.NewIdRef()
         self._id_f3 = wx.NewIdRef()
         self._id_f4 = wx.NewIdRef()
         self._id_f6 = wx.NewIdRef()
         accelerators = [
             (wx.ACCEL_NORMAL, wx.WXK_F5, wx.ID_REFRESH),
-            (wx.ACCEL_NORMAL, wx.WXK_F1, self._id_f1),
+            (wx.ACCEL_NORMAL, wx.WXK_F1, self._project_help_id),
             (wx.ACCEL_NORMAL, wx.WXK_F2, self._id_f2),
             (wx.ACCEL_NORMAL, wx.WXK_F3, self._id_f3),
             (wx.ACCEL_NORMAL, wx.WXK_F4, self._id_f4),
@@ -798,7 +882,6 @@ class MainFrame(wx.Frame):
         accelerator = wx.AcceleratorTable(accelerators)
         self.SetAcceleratorTable(accelerator)
         self.Bind(wx.EVT_MENU, self._on_refresh, id=wx.ID_REFRESH)
-        self.Bind(wx.EVT_MENU, lambda _e: self.play_sound_effect("pistol"), id=self._id_f1)
         self.Bind(wx.EVT_MENU, lambda _e: self.play_sound_effect("machine_gun"), id=self._id_f2)
         self.Bind(wx.EVT_MENU, lambda _e: self.play_sound_effect("applause"), id=self._id_f3)
         self.Bind(wx.EVT_MENU, lambda _e: self.play_sound_effect("dj_horn"), id=self._id_f4)
@@ -809,6 +892,7 @@ class MainFrame(wx.Frame):
             id=self._open_soundboard_id,
         )
         self.Bind(wx.EVT_MENU, self._on_stop_effects, id=self._stop_effects_id)
+        self.Bind(wx.EVT_MENU, self._on_project_help, id=self._project_help_id)
         self.Bind(
             wx.EVT_MENU,
             self._on_check_for_updates,
@@ -829,6 +913,13 @@ class MainFrame(wx.Frame):
 
     def _on_check_for_updates(self, _event: wx.Event) -> None:
         self._start_update_check(True)
+
+    def _on_project_help(self, _event: wx.Event) -> None:
+        dialog = HelpDialog(self)
+        try:
+            dialog.ShowModal()
+        finally:
+            dialog.Destroy()
 
     def _on_open_soundboard(self, _event: wx.Event) -> None:
         dialog = SoundboardDialog(self)
@@ -1046,7 +1137,9 @@ class MainFrame(wx.Frame):
             "ouvido para evitar microfonia. Faça um teste de gravação no "
             "aplicativo de conversa antes de entrar em uma chamada. Todos os "
             "controles podem ser operados pelo teclado e são compatíveis com "
-            "leitores de tela.",
+            "leitores de tela.\n\n"
+            "A qualquer momento, pressione F1 para conhecer melhor o projeto, "
+            "consultar todos os atalhos e ler os créditos do programa.",
             "Bem-vindo à Mini Mesa de Som",
             wx.OK | wx.ICON_INFORMATION,
             self,
