@@ -12,8 +12,12 @@ from mini_mesa.audio_engine import (
     _HOST_API_RANKS,
     _MONITOR_API_RANKS,
     _MultiOutputSoundDeviceStream,
+    _is_windows_default_alias,
+    _merge_mme_truncated_labels,
     _normalize_device_label,
     _normalize_output_device_label,
+    _resolve_device_label,
+    match_device_label,
 )
 from mini_mesa.settings import ReverbSettings, SpatialSettings
 
@@ -384,6 +388,109 @@ class AudioEngineTests(unittest.TestCase):
             _normalize_device_label("Microfone (5- USB Audio Device)"),
             "Microfone (USB Audio Device)",
         )
+
+    def test_saved_microphone_survives_windows_instance_renumbering(self) -> None:
+        available = ("Microfone (USB Audio Device)", "Microfone (Webcam)")
+
+        resolved = _resolve_device_label(
+            "Microfone (7- USB Audio Device)",
+            available,
+        )
+
+        self.assertEqual(resolved, "Microfone (USB Audio Device)")
+
+    def test_saved_virtual_cable_name_survives_api_name_change(self) -> None:
+        resolved = _resolve_device_label(
+            "Line Out (Virtual Cable 1)",
+            ("Line 1 (Virtual Audio Cable)", "Alto-falantes"),
+            output=True,
+        )
+
+        self.assertEqual(resolved, "Line 1 (Virtual Audio Cable)")
+
+    def test_virtual_cable_input_is_grouped_across_windows_apis(self) -> None:
+        self.assertEqual(
+            _normalize_device_label("Line 1 (Virtual Cable 1)"),
+            "Line 1 (Virtual Audio Cable)",
+        )
+
+    def test_device_matching_is_case_insensitive(self) -> None:
+        resolved = _resolve_device_label(
+            "microfone (usb audio device)",
+            ("Microfone (USB Audio Device)",),
+        )
+
+        self.assertEqual(resolved, "Microfone (USB Audio Device)")
+
+    def test_missing_saved_device_has_no_false_match(self) -> None:
+        self.assertIsNone(
+            match_device_label("Microfone removido", ("Microfone USB",))
+        )
+
+    def test_mme_truncated_name_is_merged_with_complete_device_name(self) -> None:
+        devices = {
+            "Alto-falantes (USB Audio Dev": [(5, "MME")],
+            "Alto-falantes (USB Audio Device)": [(22, "Windows WASAPI")],
+        }
+
+        _merge_mme_truncated_labels(devices)
+
+        self.assertEqual(
+            devices,
+            {
+                "Alto-falantes (USB Audio Device)": [
+                    (22, "Windows WASAPI"),
+                    (5, "MME"),
+                ]
+            },
+        )
+
+    def test_ambiguous_mme_prefix_is_not_merged(self) -> None:
+        devices = {
+            "Dispositivo de áudio USB": [(5, "MME")],
+            "Dispositivo de áudio USB A": [(22, "Windows WASAPI")],
+            "Dispositivo de áudio USB B": [(23, "Windows WASAPI")],
+        }
+
+        _merge_mme_truncated_labels(devices)
+
+        self.assertEqual(len(devices), 3)
+
+    def test_generic_windows_audio_aliases_are_hidden(self) -> None:
+        self.assertTrue(_is_windows_default_alias("Mapeador de som da Microsoft"))
+        self.assertTrue(_is_windows_default_alias("Primary Sound Driver"))
+        self.assertFalse(_is_windows_default_alias("Microfone USB"))
+
+    def test_route_resolution_discards_cached_portaudio_ids(self) -> None:
+        backend = object.__new__(PedalboardBackend)
+        backend._input_ids = {
+            "Microfone (USB Audio Device)": [(4, "Windows WASAPI")]
+        }
+        backend._output_ids = {"CABLE Input": [(8, "Windows WASAPI")]}
+        refresh_count = 0
+
+        def simulate_windows_renumbering() -> None:
+            nonlocal refresh_count
+            refresh_count += 1
+            backend._input_ids = {
+                "Microfone (USB Audio Device)": [(31, "Windows WDM-KS")]
+            }
+            backend._output_ids = {
+                "CABLE Input": [(44, "Windows WDM-KS")]
+            }
+
+        backend._refresh_devices = simulate_windows_renumbering  # type: ignore[method-assign]
+
+        inputs, outputs, monitors = backend._resolve_current_routes(
+            "Microfone (9- USB Audio Device)",
+            "CABLE Input",
+            None,
+        )
+
+        self.assertEqual(refresh_count, 1)
+        self.assertEqual(inputs, [(31, "Windows WDM-KS")])
+        self.assertEqual(outputs, [(44, "Windows WDM-KS")])
+        self.assertEqual(monitors, [(None, "")])
 
     def test_devices_are_not_tied_to_a_microphone_brand(self) -> None:
         engine = AudioEngine(FakeBackend())

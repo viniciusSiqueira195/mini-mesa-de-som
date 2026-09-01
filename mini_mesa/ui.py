@@ -6,7 +6,7 @@ from dataclasses import replace
 import wx
 import wx.adv
 
-from .audio_engine import AudioDependencyError, AudioEngine
+from .audio_engine import AudioDependencyError, AudioEngine, match_device_label
 from .preferences import AppPreferences, PreferencesStore
 from .settings import ReverbSettings, SpatialSettings
 from .updater import (
@@ -525,8 +525,13 @@ class MainFrame(wx.Frame):
         prefer_virtual: bool = False,
     ) -> None:
         choice.Set(values)
-        if previous and previous in values:
-            choice.SetStringSelection(previous)
+        matched_previous = match_device_label(
+            previous,
+            values,
+            output=prefer_virtual or prefer_physical_output,
+        )
+        if matched_previous is not None:
+            choice.SetStringSelection(matched_previous)
         elif prefer_physical_input:
             preferred = next(
                 (
@@ -822,7 +827,11 @@ class MainFrame(wx.Frame):
             self.restore_from_tray()
         self._set_routing_controls_enabled(True)
         self.toggle_button.SetLabel("&Ativar mesa")
+        self._refresh_devices()
         self.status.ChangeValue("Desativado após uma falha no dispositivo.")
+        self.SetStatusText(
+            "Mesa desativada; os dispositivos foram detectados novamente."
+        )
         self._show_error(f"O processamento de áudio foi interrompido.\n\n{message}")
 
     def _show_error(self, message: str) -> None:

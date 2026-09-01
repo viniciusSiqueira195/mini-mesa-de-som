@@ -25,13 +25,29 @@ _MONITOR_API_RANKS = {
 }
 _DEVICE_INSTANCE_PREFIX = re.compile(r"\((?:\d+\s*-\s*)")
 _VAC_LINE_OUT = re.compile(r"^Line Out \(Virtual Cable (\d+)\)$", re.IGNORECASE)
+_VAC_LINE_INPUT = re.compile(
+    r"^Line \d+ \(Virtual Cable (\d+)\)$",
+    re.IGNORECASE,
+)
+_WINDOWS_DEFAULT_ALIASES = (
+    "driver de captura de som primário",
+    "driver de som primário",
+    "mapeador de som da microsoft",
+    "microsoft sound mapper",
+    "primary sound capture driver",
+    "primary sound driver",
+)
 
 
 def _normalize_device_label(label: str) -> str:
     """Collapse Windows instance prefixes such as ``(5- USB Audio Device)``."""
 
     compact = " ".join(label.split())
-    return _DEVICE_INSTANCE_PREFIX.sub("(", compact)
+    normalized = _DEVICE_INSTANCE_PREFIX.sub("(", compact)
+    virtual_line = _VAC_LINE_INPUT.fullmatch(normalized)
+    if virtual_line is not None:
+        return f"Line {virtual_line.group(1)} (Virtual Audio Cable)"
+    return normalized
 
 
 def _normalize_output_device_label(label: str) -> str:
@@ -42,6 +58,66 @@ def _normalize_output_device_label(label: str) -> str:
     if match is not None:
         return f"Line {match.group(1)} (Virtual Audio Cable)"
     return normalized
+
+
+def _resolve_device_label(
+    requested: str,
+    available: Sequence[str],
+    *,
+    output: bool = False,
+) -> str:
+    """Resolve a saved label after Windows renames or renumbers an endpoint."""
+
+    normalize = _normalize_output_device_label if output else _normalize_device_label
+    requested_key = normalize(requested).casefold()
+    for label in available:
+        if normalize(label).casefold() == requested_key:
+            return label
+    raise KeyError(requested)
+
+
+def match_device_label(
+    requested: str,
+    available: Sequence[str],
+    *,
+    output: bool = False,
+) -> str | None:
+    """Return the current label matching a possibly old saved preference."""
+
+    if not requested:
+        return None
+    try:
+        return _resolve_device_label(requested, available, output=output)
+    except KeyError:
+        return None
+
+
+def _is_windows_default_alias(label: str) -> bool:
+    """Identify generic Windows aliases that duplicate the default endpoint."""
+
+    return label.casefold().startswith(_WINDOWS_DEFAULT_ALIASES)
+
+
+def _merge_mme_truncated_labels(
+    devices: dict[str, list[tuple[int, str]]],
+) -> None:
+    """Merge 31-character MME labels into their complete API counterpart."""
+
+    for truncated in tuple(devices):
+        candidates = devices.get(truncated)
+        if candidates is None or not any(api == "MME" for _id, api in candidates):
+            continue
+        matches = [
+            label
+            for label in devices
+            if label != truncated
+            and len(label) > len(truncated)
+            and label.casefold().startswith(truncated.casefold())
+        ]
+        if len(matches) != 1:
+            continue
+        complete = matches[0]
+        devices[complete].extend(devices.pop(truncated))
 
 
 class AudioDependencyError(RuntimeError):
@@ -144,11 +220,16 @@ class PedalboardBackend:
         for device_id, device in enumerate(devices):
             host_name = host_apis[device["hostapi"]]["name"]
             label = _normalize_device_label(device["name"])
+            if _is_windows_default_alias(label):
+                continue
             if device["max_input_channels"] > 0:
                 input_ids.setdefault(label, []).append((device_id, host_name))
             if device["max_output_channels"] > 0:
                 output_label = _normalize_output_device_label(device["name"])
                 output_ids.setdefault(output_label, []).append((device_id, host_name))
+
+        _merge_mme_truncated_labels(input_ids)
+        _merge_mme_truncated_labels(output_ids)
 
         for candidates in (*input_ids.values(), *output_ids.values()):
             candidates.sort(key=lambda candidate: _HOST_API_RANKS.get(candidate[1], 99))
@@ -179,26 +260,15 @@ class PedalboardBackend:
         settings: ReverbSettings,
         monitor_output: str | None = None,
     ) -> AudioStream:
-        if (
-            input_device not in self._input_ids
-            or output_device not in self._output_ids
-            or (monitor_output is not None and monitor_output not in self._output_ids)
-        ):
-            self._refresh_devices()
         try:
-            input_candidates = self._input_ids[input_device]
-            output_candidates = self._output_ids[output_device]
-            monitor_candidates = (
-                sorted(
-                    (
-                        candidate
-                        for candidate in self._output_ids[monitor_output]
-                        if candidate[1] in _MONITOR_API_RANKS
-                    ),
-                    key=lambda candidate: _MONITOR_API_RANKS[candidate[1]],
-                )
-                if monitor_output is not None
-                else [(None, "")]
+            (
+                input_candidates,
+                output_candidates,
+                monitor_candidates,
+            ) = self._resolve_current_routes(
+                input_device,
+                output_device,
+                monitor_output,
             )
         except KeyError as exc:
             raise ValueError(
@@ -288,6 +358,48 @@ class PedalboardBackend:
             "Se o retorno estiver marcado, tente também outra saída de retorno."
             f"{details}"
         )
+
+    def _resolve_current_routes(
+        self,
+        input_device: str,
+        output_device: str,
+        monitor_output: str | None,
+    ) -> tuple[
+        list[tuple[int, str]],
+        list[tuple[int, str]],
+        list[tuple[int | None, str]],
+    ]:
+        """Return candidates using a fresh PortAudio device snapshot."""
+
+        # PortAudio IDs are positions in the current device list, not persistent
+        # Windows endpoint identifiers. Driver and Windows updates can renumber
+        # every endpoint while their user-facing names remain unchanged.
+        self._refresh_devices()
+        resolved_input = _resolve_device_label(input_device, self._input_ids)
+        resolved_output = _resolve_device_label(
+            output_device,
+            self._output_ids,
+            output=True,
+        )
+        input_candidates = self._input_ids[resolved_input]
+        output_candidates = self._output_ids[resolved_output]
+        if monitor_output is None:
+            return input_candidates, output_candidates, [(None, "")]
+
+        resolved_monitor = _resolve_device_label(
+            monitor_output,
+            self._output_ids,
+            output=True,
+        )
+        monitor_candidates: list[tuple[int | None, str]] = sorted(
+            (
+                candidate
+                for candidate in self._output_ids[resolved_monitor]
+                if candidate[1] in _MONITOR_API_RANKS
+            ),
+            key=lambda candidate: _MONITOR_API_RANKS[candidate[1]],
+        )
+        return input_candidates, output_candidates, monitor_candidates
 
     def _find_common_sample_rate(
         self,
@@ -403,13 +515,17 @@ class PedalboardBackend:
             stream.replace_monitor(None, 0)
             return
 
-        if monitor_output not in self._output_ids:
-            self._refresh_devices()
+        self._refresh_devices()
         try:
+            resolved_monitor = _resolve_device_label(
+                monitor_output,
+                self._output_ids,
+                output=True,
+            )
             candidates = sorted(
                 (
                     candidate
-                    for candidate in self._output_ids[monitor_output]
+                    for candidate in self._output_ids[resolved_monitor]
                     if candidate[1] in _MONITOR_API_RANKS
                 ),
                 key=lambda candidate: _MONITOR_API_RANKS[candidate[1]],
@@ -952,9 +1068,6 @@ class AudioEngine:
                 if self._stream is stream:
                     self._stream = None
                     self._thread = None
-                    self._input_device = None
-                    self._output_device = None
-                    self._monitor_output = None
                     self._input_device = None
                     self._output_device = None
                     self._monitor_output = None

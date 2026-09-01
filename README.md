@@ -245,7 +245,8 @@ estudo sem atrasar a rota usada por gravações e aplicativos de conversa.
 ## Testes
 
 ```powershell
-python -m unittest discover -s tests -v
+python -m pip install -e ".[test]"
+python -m pytest
 ```
 
 A suíte valida configurações, preferências, ciclo do motor, continuidade dos
