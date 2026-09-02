@@ -1,6 +1,6 @@
 # Histórico de versões
 
-## 0.2.0 — 2026-09-01
+## 1.0.0 — 2026-09-01
 
 - Posicionamento binaural 3D por coordenadas X, Y e Z.
 - Movimento espacial automático por frente, direita, trás, esquerda, cima e baixo.
@@ -18,7 +18,7 @@
 
 ### Instalação
 
-Baixe `MiniMesaDeSom-Setup-0.2.0.exe` nos arquivos da release. O instalador usa o
+Baixe `MiniMesaDeSom-Setup-1.0.0.exe` nos arquivos da release. O instalador usa o
 mesmo identificador da versão anterior e atualiza a instalação existente sem
 apagar as preferências do usuário.
 

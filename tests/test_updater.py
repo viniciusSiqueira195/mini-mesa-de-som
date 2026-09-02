@@ -20,17 +20,17 @@ class UpdaterTests(unittest.TestCase):
 
     def test_latest_release_requires_matching_installer_and_checksum(self) -> None:
         payload = {
-            "tag_name": "v0.2.0",
+            "tag_name": "v1.0.0",
             "body": "Correções importantes.",
             "html_url": "https://example.invalid/release",
             "assets": [
                 {
-                    "name": "MiniMesaDeSom-Setup-0.2.0.exe",
+                    "name": "MiniMesaDeSom-Setup-1.0.0.exe",
                     "browser_download_url": "https://example.invalid/setup.exe",
                     "size": 123,
                 },
                 {
-                    "name": "MiniMesaDeSom-Setup-0.2.0.exe.sha256",
+                    "name": "MiniMesaDeSom-Setup-1.0.0.exe.sha256",
                     "browser_download_url": "https://example.invalid/setup.sha256",
                 },
             ],
@@ -38,7 +38,7 @@ class UpdaterTests(unittest.TestCase):
         with patch.object(updater, "_download_text", return_value=json.dumps(payload)):
             info = updater.fetch_latest_release("0.1.0")
 
-        self.assertEqual(info.latest_version, "0.2.0")
+        self.assertEqual(info.latest_version, "1.0.0")
         self.assertEqual(info.installer_size, 123)
         self.assertTrue(info.checksum_url.endswith("setup.sha256"))
 
@@ -60,10 +60,10 @@ class UpdaterTests(unittest.TestCase):
         payload = b"MZmini-mesa-installer"
         info = updater.UpdateInfo(
             current_version="0.1.0",
-            latest_version="0.2.0",
+            latest_version="1.0.0",
             release_notes="",
             release_page_url="",
-            installer_name="MiniMesaDeSom-Setup-0.2.0.exe",
+            installer_name="MiniMesaDeSom-Setup-1.0.0.exe",
             installer_url="https://example.invalid/setup.exe",
             installer_size=len(payload),
             checksum_url="https://example.invalid/setup.sha256",
@@ -105,7 +105,7 @@ class UpdaterTests(unittest.TestCase):
 
     def test_launch_installer_uses_safe_silent_update_arguments(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
-            installer = Path(temporary_directory) / "MiniMesaDeSom-Setup-0.2.0.exe"
+            installer = Path(temporary_directory) / "MiniMesaDeSom-Setup-1.0.0.exe"
             installer.write_bytes(b"MZ")
 
             with patch.object(updater.subprocess, "Popen") as popen:
