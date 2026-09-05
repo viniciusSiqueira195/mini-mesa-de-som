@@ -34,7 +34,7 @@ entradas reconhecidas pelo Windows podem ser selecionadas diretamente.
 - Interface nativa acessível com NVDA e operação completa pelo teclado.
 - Seleção independente do microfone, cabo virtual e dispositivo de retorno.
 - Reverb ajustado por um único controle simples de 0 a 100.
-- Modificador de voz com presets de pitch, harmonização, auto-tune e vocoder.
+- Modificador de voz com presets de pitch e harmonização.
 - Efeitos criativos, modulações, ambientes e controles de intensidade com
   bypass real em 0%.
 - Compressor, equalizador, noise gate, de-esser, expander, ganho automático e
@@ -74,7 +74,7 @@ Microfone físico
 Os efeitos do soundboard entram na mesma rota antes do limitador. Eles chegam ao
 aplicativo de conversa e ao retorno sem abrir outro dispositivo de áudio.
 
-Quando **Ouvir retorno** está marcado, uma cópia do áudio processado também
+Quando **Ouvir retorno** está ligado, uma cópia do áudio processado também
 segue para o fone escolhido. Use fones de ouvido para evitar microfonia. Esse
 retorno ainda é experimental e pode apresentar estalos em algumas combinações
 de dispositivos; a rota do cabo virtual permanece isolada para que isso não
@@ -164,10 +164,32 @@ Com o VB-CABLE como exemplo:
 1. Em **Microfone de entrada**, escolha o microfone físico.
 2. Em **Saída virtual**, escolha `CABLE Input`.
 3. No aplicativo de conversa, escolha `CABLE Output` como microfone.
-4. Marque os efeitos desejados e pressione **Ativar mesa**.
+4. Ative os efeitos desejados nas guias e pressione **Ativar mesa**.
 
 **Desativar mesa** interrompe somente a transmissão e mantém a janela aberta.
 **Encerrar programa** para o áudio e fecha o aplicativo.
+
+## Organização por guias
+
+A janela reúne os controles em cinco guias:
+
+- **Dispositivos**: microfone, saída virtual e retorno.
+- **Voz e efeitos**: modificador de voz, reverb, estilos, modulações, ambientes e eco.
+- **Limpeza da voz**: compressor, equalizador, filtros e redução de ruído.
+- **Áudio 3D**: posição e movimento espacial.
+- **Sons e vinhetas**: reprodução de sons, arquivo personalizado, volume e ducking.
+
+Use `Ctrl+Tab` para avançar e `Ctrl+Shift+Tab` para voltar entre as guias.
+O foco fica no seletor de guias; `Tab` entra nos controles da guia selecionada.
+`Tab` e `Shift+Tab` percorrem seus controles e as ações gerais da janela.
+Os controles das outras guias ficam ocultos. Trocar de guia mantém o áudio e
+todos os efeitos ativos, inclusive os configurados em outra guia.
+
+Os botões de efeitos mostram a ação **Ativar** ou **Desativar** e o estado
+**Ligado** ou **Desligado**. Pressione `Espaço` para alternar o botão em foco.
+**Ativar/Desativar mesa**, **Encerrar programa** e o estado do processamento
+permanecem disponíveis fora das guias. Os atalhos globais de efeitos e ajustes
+revelam automaticamente a guia correspondente.
 
 ## Bandeja do sistema
 
@@ -183,6 +205,11 @@ restaura a janela automaticamente antes de mostrar a mensagem de erro.
 
 ## Efeitos
 
+Os presets experimentais de auto-tune e vocoder foram removidos porque não
+entregavam a afinação vocal pretendida. Preferências antigas desses presets
+são carregadas com o modificador de voz desativado e tom neutro; as demais
+preferências são preservadas.
+
 ### Reverb
 
 O controle **Nível de reverb** combina internamente a quantidade do efeito, o
@@ -193,7 +220,7 @@ a mesa está funcionando.
 ### Redução de ruído
 
 O RNNoise reduz ruídos de fundo antes dos efeitos e não envia áudio para a
-internet. A opção fica desmarcada por padrão, requer processamento em 48 kHz e
+internet. A opção fica desligada por padrão, requer processamento em 48 kHz e
 adiciona um quadro fixo de 10 milissegundos. Quando essa opção é alterada com a
 mesa ativa, a rota é reiniciada de forma controlada para renegociar a taxa.
 
@@ -217,10 +244,11 @@ para avaliá-lo ou use o retorno experimental.
 
 ### Soundboard acessível
 
-O menu **Efeitos** abre uma janela separada para não ocupar a interface principal.
-Use as setas para escolher um som, `Enter` para reproduzir, `Espaço` para parar
-todos e `Escape` para fechar. Os atalhos diretos funcionam com a janela fechada,
-desde que a Mini Mesa esteja em foco e ativa.
+O menu **Efeitos > Abrir soundboard** ou `Ctrl+Shift+E` seleciona a guia
+**Sons e vinhetas** e leva o foco à lista de sons. Na lista, use as setas para
+escolher um som, `Enter` para reproduzir e `Espaço` para parar todos.
+Os atalhos diretos funcionam em qualquer guia, desde que a Mini Mesa esteja
+em foco e ativa.
 
 Os efeitos podem tocar simultaneamente e entram na mesma cadeia da voz. Portanto,
 reverb e áudio espacial 3D ativos também processam todos os sons do soundboard.
@@ -236,6 +264,8 @@ distribuído junto com o programa. A procedência completa fica registrada em
 
 ## Atalhos
 
+- `Ctrl+Tab`: próxima guia.
+- `Ctrl+Shift+Tab`: guia anterior.
 - `Alt+M`: escolher o microfone.
 - `Alt+S`: escolher a saída virtual.
 - `Alt+O`: ativar ou desativar o retorno experimental.
@@ -247,7 +277,7 @@ distribuído junto com o programa. A procedência completa fica registrada em
 - `Alt+X`, `Alt+Y` e `Alt+Z`: ajustar as coordenadas espaciais.
 - `Alt+U`: ativar ou desativar o movimento automático.
 - `Alt+V`: ajustar a velocidade do movimento espacial.
-- `Ctrl+Shift+E`: abrir o soundboard acessível.
+- `Ctrl+Shift+E`: acessar a guia Sons e vinhetas e focar a lista de sons.
 - `Ctrl+1`: reproduzir pistola.
 - `Ctrl+2`: reproduzir metralhadora.
 - `Ctrl+3`: reproduzir palmas.

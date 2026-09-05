@@ -34,7 +34,7 @@ class PreferencesStoreTests(unittest.TestCase):
 
             self.assertEqual(store.load(), expected)
             saved = json.loads(path.read_text(encoding="utf-8"))
-            self.assertEqual(saved["schema_version"], 7)
+            self.assertEqual(saved["schema_version"], 8)
             self.assertEqual(saved["input_device"], "Microfone Áudio")
 
     def test_invalid_file_falls_back_to_defaults(self) -> None:
@@ -109,6 +109,21 @@ class PreferencesStoreTests(unittest.TestCase):
         )
 
         self.assertEqual(preferences.voice_preset, "male")
+
+    def test_removed_voice_presets_migrate_to_disabled_neutral_voice(self) -> None:
+        for preset in ("autotune", "vocoder"):
+            preferences = AppPreferences.from_dict({
+                "voice_enabled": True, "voice_preset": preset,
+                "voice_pitch_semitones": 4.0, "autotune_mode": "trap",
+                "autotune_scale": "minor", "autotune_key": 9,
+                "eq_enabled": True, "eq_low_db": 3.0,
+            })
+            self.assertFalse(preferences.voice_enabled)
+            self.assertEqual(preferences.voice_preset, "custom")
+            self.assertEqual(preferences.voice_pitch_semitones, 0.0)
+            self.assertTrue(preferences.eq_enabled)
+            self.assertEqual(preferences.eq_low_db, 3.0)
+            self.assertFalse(hasattr(preferences, "autotune_mode"))
 
 
 if __name__ == "__main__":

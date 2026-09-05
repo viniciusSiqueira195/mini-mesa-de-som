@@ -41,6 +41,11 @@ class VoiceSettingsTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             VoiceSettings(pitch_semitones="high")  # type: ignore[arg-type]
 
+    def test_removed_voice_presets_are_rejected(self) -> None:
+        for preset in ("autotune", "vocoder"):
+            with self.assertRaises(ValueError):
+                VoiceSettings(enabled=True, preset=preset)
+
 
 class CreativeEffectSettingsTests(unittest.TestCase):
     def test_defaults_and_presets(self) -> None:

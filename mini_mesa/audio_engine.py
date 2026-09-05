@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import threading
+from dataclasses import replace
 from collections import deque
 from collections.abc import Callable, Sequence
 from itertools import product
@@ -153,6 +154,7 @@ class _StreamingPitchShifter:
         sample_rate: float,
         window_size: int = 4096,
         overlap: int = 1024,
+        synchronous: bool = False,
     ) -> None:
         if overlap <= 0 or overlap >= window_size:
             raise ValueError("A sobreposição deve ser menor que a janela de pitch.")
@@ -162,8 +164,13 @@ class _StreamingPitchShifter:
         self._window_size = window_size
         self._overlap = overlap
         self._hop_size = window_size - overlap
+        self._synchronous = synchronous
         self._input = numpy_module.empty(0, dtype=numpy_module.float32)
         self._output = numpy_module.empty(0, dtype=numpy_module.float32)
+        if synchronous:
+            # A fixed analysis delay guarantees enough samples for every
+            # callback, including block sizes that do not divide the hop.
+            self._output = numpy_module.zeros(window_size, dtype=numpy_module.float32)
         self._pending_tail = None
         self._output_lock = threading.Lock()
         self._error: Exception | None = None
@@ -175,7 +182,8 @@ class _StreamingPitchShifter:
         self._fade_in = numpy_module.sin(phase).astype(numpy_module.float32) ** 2
         self._fade_out = 1.0 - self._fade_in
         self._worker = threading.Thread(target=self._run, daemon=True)
-        self._worker.start()
+        if not synchronous:
+            self._worker.start()
 
     def process(self, samples):
         with self._output_lock:
@@ -187,10 +195,13 @@ class _StreamingPitchShifter:
 
         while self._input.size >= self._window_size:
             window = self._input[: self._window_size].copy()
-            try:
-                self._jobs.put_nowait(window)
-            except Full:
-                pass
+            if self._synchronous:
+                self._output = self._np.concatenate((self._output, self._render_window(window)))
+            else:
+                try:
+                    self._jobs.put_nowait(window)
+                except Full:
+                    pass
             self._input = self._input[self._hop_size :]
 
         output = self._np.zeros(samples.size, dtype=self._np.float32)
@@ -212,7 +223,7 @@ class _StreamingPitchShifter:
             self._jobs.put_nowait(None)
         except Full:
             pass
-        if timeout > 0.0 and self._worker is not threading.current_thread():
+        if not self._synchronous and timeout > 0.0 and self._worker is not threading.current_thread():
             self._worker.join(timeout=timeout)
 
     def _run(self) -> None:
@@ -221,30 +232,28 @@ class _StreamingPitchShifter:
                 window = self._jobs.get()
                 if window is None or self._stopped.is_set():
                     return
-                shifted = self._processor.process(
-                    window[self._np.newaxis, :],
-                    self._sample_rate,
-                    buffer_size=self._window_size,
-                    reset=True,
-                )
-                shifted = self._np.asarray(shifted, dtype=self._np.float32).reshape(-1)
-                if self._pending_tail is None:
-                    produced = shifted[: self._hop_size]
-                else:
-                    crossfade = (
-                        self._pending_tail * self._fade_out
-                        + shifted[: self._overlap] * self._fade_in
-                    )
-                    produced = self._np.concatenate(
-                        (crossfade, shifted[self._overlap : self._hop_size])
-                    )
-                self._pending_tail = shifted[self._hop_size :].copy()
+                produced = self._render_window(window)
                 if not self._stopped.is_set():
                     with self._output_lock:
                         self._output = self._np.concatenate((self._output, produced))
         except Exception as exc:
             with self._output_lock:
                 self._error = exc
+
+    def _render_window(self, window):
+        shifted = self._processor.process(
+            window[self._np.newaxis, :], self._sample_rate,
+            buffer_size=self._window_size, reset=True,
+        )
+        shifted = self._np.asarray(shifted, dtype=self._np.float32).reshape(-1)
+        if self._pending_tail is None:
+            produced = shifted[:self._hop_size]
+        else:
+            crossfade = (self._pending_tail * self._fade_out
+                         + shifted[:self._overlap] * self._fade_in)
+            produced = self._np.concatenate((crossfade, shifted[self._overlap:self._hop_size]))
+        self._pending_tail = shifted[self._hop_size:].copy()
+        return produced
 
 
 class _MixedPitchProcessor:
@@ -259,37 +268,49 @@ class _MixedPitchProcessor:
         return self._dry * self._np.asarray(samples) + self._wet * shifted
 
 
-class _AutoTuneProcessor:
-    """Chromatic pitch correction for one analysis window at a time."""
+class _SmoothEqualizer:
+    """Keep filter history alive and ramp gain changes over 20 milliseconds."""
 
-    def __init__(self, numpy_module, pedalboard_factory, pitch_factory) -> None:
+    def __init__(self, numpy_module, pedalboard_factory, filters):
         self._np = numpy_module
-        self._Pedalboard = pedalboard_factory
-        self._PitchShift = pitch_factory
+        self._filters = tuple(filters)
+        self._board = pedalboard_factory(filters)
+        self._gains = (0.0, 0.0, 0.0)
+        self._target = self._gains
+        self._remaining_seconds = 0.0
 
-    def process(self, samples, sample_rate, **_kwargs):
-        mono = self._np.asarray(samples, dtype=self._np.float32).reshape(-1)
-        centered = mono - self._np.mean(mono)
-        if float(self._np.sqrt(self._np.mean(centered * centered))) < 0.002:
-            return samples
-        fft_size = 1 << ((centered.size * 2 - 1).bit_length())
-        spectrum = self._np.fft.rfft(centered, fft_size)
-        correlation = self._np.fft.irfft(spectrum * self._np.conj(spectrum))
-        minimum_lag = max(1, round(sample_rate / 500.0))
-        maximum_lag = min(centered.size - 1, round(sample_rate / 80.0))
-        lag = minimum_lag + int(
-            self._np.argmax(correlation[minimum_lag : maximum_lag + 1])
+    def update(self, settings):
+        target = (
+            (settings.eq_low_db, settings.eq_mid_db, settings.eq_high_db)
+            if settings.eq_enabled else (0.0, 0.0, 0.0)
         )
-        frequency = sample_rate / lag
-        midi_note = 69.0 + 12.0 * self._np.log2(frequency / 440.0)
-        correction = float(self._np.clip(round(midi_note) - midi_note, -1.0, 1.0))
-        processor = self._Pedalboard([self._PitchShift(semitones=correction)])
-        return processor.process(
-            samples,
-            sample_rate,
-            buffer_size=mono.size,
-            reset=True,
-        )
+        if target != self._target:
+            self._target = target
+            self._remaining_seconds = 0.020
+
+    def process(self, samples, sample_rate, **kwargs):
+        # Keep the plugin's preparation size constant during and after ramps.
+        kwargs = dict(kwargs, buffer_size=64)
+        if not self._remaining_seconds:
+            return self._board.process(samples, sample_rate, **kwargs)
+        output = self._np.empty_like(samples)
+        for start in range(0, samples.shape[-1], 64):
+            end = min(start + 64, samples.shape[-1])
+            duration = (end - start) / sample_rate
+            fraction = min(1.0, duration / self._remaining_seconds) if self._remaining_seconds else 1.0
+            self._gains = tuple(
+                gain + (target - gain) * fraction
+                for gain, target in zip(self._gains, self._target)
+            )
+            for effect, gain in zip(self._filters, self._gains):
+                effect.gain_db = gain
+            self._remaining_seconds = max(0.0, self._remaining_seconds - duration)
+            block_options = dict(kwargs)
+            block_options["reset"] = bool(kwargs.get("reset", False)) and start == 0
+            output[..., start:end] = self._board.process(
+                samples[..., start:end], sample_rate, **block_options
+            )
+        return output
 
 
 class _EffectChain:
@@ -303,9 +324,14 @@ class _EffectChain:
         style_effects,
         post_effects,
         style_mix: float,
+        equalizer=None,
+        before_eq_effects=(),
     ) -> None:
         self._np = numpy_module
-        self._plugins = tuple((*pre_effects, *style_effects, *post_effects))
+        self._plugins = tuple((*pre_effects, *style_effects, *before_eq_effects,
+                               *(equalizer._filters if equalizer else ()), *post_effects))
+        self._before_eq = pedalboard_factory(before_eq_effects) if before_eq_effects else None
+        self._equalizer = equalizer
         self._pre = pedalboard_factory(pre_effects) if pre_effects else None
         self._style = pedalboard_factory(style_effects) if style_effects else None
         self._post = pedalboard_factory(post_effects) if post_effects else None
@@ -332,6 +358,10 @@ class _EffectChain:
                     ]
                 ).astype(self._np.float32)
             current = current * (1.0 - self._style_mix) + styled * self._style_mix
+        if self._before_eq is not None:
+            current = self._before_eq.process(current, sample_rate, **kwargs)
+        if self._equalizer is not None:
+            current = self._equalizer.process(current, sample_rate, **kwargs)
         if self._post is not None:
             current = self._post.process(current, sample_rate, **kwargs)
         return current
@@ -449,12 +479,6 @@ class _RealtimeTransform:
             )
             self._roger_samples -= beep_count
 
-        if self._voice_preset == "vocoder":
-            carrier = self._np.sign(
-                self._np.sin(2.0 * self._np.pi * 95.0 * positions / self._sample_rate)
-            )
-            envelope = self._np.minimum(1.0, self._np.abs(output) * 8.0)
-            output = 0.25 * output + 0.75 * carrier * envelope * 0.12
         if self._style_preset == "reverse":
             output = 0.35 * output + 0.65 * output[::-1]
         elif self._style_preset in ("glitch", "stutter"):
@@ -786,6 +810,11 @@ class PedalboardBackend:
         self._Reverb = Reverb
         self._reverb = None
         self._effects = None
+        self._equalizer = _SmoothEqualizer(np, Pedalboard, [
+            LowShelfFilter(cutoff_frequency_hz=150.0, gain_db=0.0),
+            PeakFilter(cutoff_frequency_hz=2500.0, gain_db=0.0, q=1.0),
+            HighShelfFilter(cutoff_frequency_hz=6000.0, gain_db=0.0),
+        ])
         self._pitch_shifter: _StreamingPitchShifter | None = None
         self._sample_rate = 48_000.0
         self._realtime_transform = _RealtimeTransform(
@@ -1162,8 +1191,16 @@ class PedalboardBackend:
 
     def update_pro_audio(self, settings: ProAudioSettings) -> None:
         with self._processing_lock:
+            previous = self._pro_audio_settings
             self._pro_audio_settings = settings
-            self._rebuild_effects_chain()
+            self._equalizer.update(settings)
+            other_settings = replace(
+                settings, eq_enabled=previous.eq_enabled,
+                eq_low_db=previous.eq_low_db, eq_mid_db=previous.eq_mid_db,
+                eq_high_db=previous.eq_high_db,
+            )
+            if self._effects is None or other_settings != previous:
+                self._rebuild_effects_chain()
 
     def update_soundboard(self, settings: SoundboardSettings) -> None:
         with self._processing_lock:
@@ -1416,29 +1453,8 @@ class PedalboardBackend:
                 )
             )
 
-        if self._pro_audio_settings.eq_enabled:
-            if self._pro_audio_settings.eq_low_db != 0.0:
-                effects.append(
-                    self._LowShelfFilter(
-                        cutoff_frequency_hz=150.0,
-                        gain_db=self._pro_audio_settings.eq_low_db,
-                    )
-                )
-            if self._pro_audio_settings.eq_mid_db != 0.0:
-                effects.append(
-                    self._PeakFilter(
-                        cutoff_frequency_hz=2500.0,
-                        gain_db=self._pro_audio_settings.eq_mid_db,
-                        q=1.0,
-                    )
-                )
-            if self._pro_audio_settings.eq_high_db != 0.0:
-                effects.append(
-                    self._HighShelfFilter(
-                        cutoff_frequency_hz=6000.0,
-                        gain_db=self._pro_audio_settings.eq_high_db,
-                    )
-                )
+        before_eq_effects = effects
+        effects = []
 
         if self._pro_audio_settings.compressor_enabled:
             effects.append(
@@ -1512,6 +1528,8 @@ class PedalboardBackend:
             style_effects,
             effects,
             style_mix,
+            equalizer=self._equalizer,
+            before_eq_effects=before_eq_effects,
         )
         self._realtime_transform = _RealtimeTransform(
             self._np,
@@ -1530,7 +1548,7 @@ class PedalboardBackend:
         if self._pitch_shifter is not None:
             self._pitch_shifter.close()
             self._pitch_shifter = None
-        if not self._voice_settings.enabled or self._voice_settings.preset == "vocoder":
+        if not self._voice_settings.enabled:
             self._pitch_shifter = None
             return
         preset = self._voice_settings.preset
@@ -1547,27 +1565,20 @@ class PedalboardBackend:
             "harmony_octave": 12.0,
             "custom": self._voice_settings.pitch_semitones,
         }
-        if preset == "autotune":
-            processor = _AutoTuneProcessor(
-                self._np, self._Pedalboard, self._PitchShift
-            )
+        semitones = pitch_map.get(preset, self._voice_settings.pitch_semitones)
+        if semitones == 0.0:
+            return
+        pitched = self._Pedalboard([self._PitchShift(semitones=semitones)])
+        if preset == "double":
+            processor = _MixedPitchProcessor(self._np, pitched, 0.58, 0.42)
+        elif preset.startswith("harmony_"):
+            processor = _MixedPitchProcessor(self._np, pitched, 0.55, 0.45)
+        elif preset == "monster":
+            processor = _MixedPitchProcessor(self._np, pitched, 0.20, 0.80)
         else:
-            semitones = pitch_map.get(preset, self._voice_settings.pitch_semitones)
-            if semitones == 0.0:
-                return
-            pitched = self._Pedalboard([self._PitchShift(semitones=semitones)])
-            if preset == "double":
-                processor = _MixedPitchProcessor(self._np, pitched, 0.58, 0.42)
-            elif preset.startswith("harmony_"):
-                processor = _MixedPitchProcessor(self._np, pitched, 0.55, 0.45)
-            elif preset == "monster":
-                processor = _MixedPitchProcessor(self._np, pitched, 0.20, 0.80)
-            else:
-                processor = pitched
+            processor = pitched
         self._pitch_shifter = _StreamingPitchShifter(
-            self._np,
-            processor,
-            self._sample_rate,
+            self._np, processor, self._sample_rate
         )
 
     def update_noise_reduction(self, enabled: bool) -> None:

@@ -109,8 +109,6 @@ _VOICE_PRESETS = (
     ("harmony_third", "Harmonizador: terça", 4),
     ("harmony_fifth", "Harmonizador: quinta", 7),
     ("harmony_octave", "Harmonizador: oitava", 12),
-    ("autotune", "Auto-tune cromático", 0),
-    ("vocoder", "Vocoder eletrônico", 0),
     ("custom", "Personalizado", None),
 )
 _STYLE_PRESETS = (
@@ -232,20 +230,57 @@ class SystemTrayIcon(wx.adv.TaskBarIcon):
         self._frame.exit_from_tray()
 
 
-class SoundboardDialog(wx.Dialog):
-    """Keyboard-first effect picker kept separate from the main mixer UI."""
+class EffectToggleButton(wx.ToggleButton):
+    """Native toggle with an explicit action and an accessible on/off state."""
 
-    def __init__(self, parent: MainFrame) -> None:
-        super().__init__(parent, title="Efeitos sonoros", size=(480, 560))
-        self._frame = parent
-        self._effects = parent.engine.sound_effects()
+    def __init__(self, parent: wx.Window, *, label: str) -> None:
+        self._effect_label = label.removeprefix("Ativar ")
+        super().__init__(parent, label=label)
+        self._refresh_label()
+
+    def _refresh_label(self) -> None:
+        enabled = self.GetValue()
+        action = "Desativar" if enabled else "Ativar"
+        state = "Ligado" if enabled else "Desligado"
+        self.SetLabel(f"{action} {self._effect_label} ({state})")
+        self.SetName(self.GetLabel().replace("&", ""))
+
+    def SetValue(self, value: bool) -> None:
+        super().SetValue(value)
+        self._refresh_label()
+
+    def BindToggle(self, handler) -> None:
+        def on_toggle(event: wx.CommandEvent) -> None:
+            self._refresh_label()
+            handler(event)
+
+        self.Bind(wx.EVT_TOGGLEBUTTON, on_toggle)
+
+    def Activate(self) -> None:
+        if self.IsEnabled():
+            self.SetValue(not self.GetValue())
+            event = wx.CommandEvent(wx.EVT_TOGGLEBUTTON.typeId, self.GetId())
+            event.SetEventObject(self)
+            event.SetInt(int(self.GetValue()))
+            self.GetEventHandler().ProcessEvent(event)
+
+
+class SoundboardPanel(wx.ScrolledWindow):
+    """Keyboard-first effect picker embedded in the mixer notebook."""
+
+    def __init__(self, parent: wx.Window, frame: MainFrame) -> None:
+        super().__init__(parent, style=wx.VSCROLL | wx.TAB_TRAVERSAL)
+        self.SetScrollRate(0, 12)
+        self.SetMinSize((1, 1))
+        self._frame = frame
+        self._effects = frame.engine.sound_effects()
 
         root = wx.BoxSizer(wx.VERTICAL)
         instructions = wx.StaticText(
             self,
             label=(
                 "Escolha um efeito. Enter reproduz, Espaço interrompe todos e "
-                "Escape fecha esta janela."
+                "Ctrl+Tab muda de guia."
             ),
         )
         instructions.Wrap(430)
@@ -265,7 +300,7 @@ class SoundboardDialog(wx.Dialog):
         self.effect_list.Bind(wx.EVT_KEY_DOWN, self._on_key_down)
         root.Add(self.effect_list, 1, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
 
-        settings = parent.soundboard_settings
+        settings = frame.soundboard_settings
         volume_label = wx.StaticText(self, label="&Volume dos efeitos, de 0 a 100:")
         root.Add(volume_label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 12)
         self.volume = wx.Slider(
@@ -279,11 +314,11 @@ class SoundboardDialog(wx.Dialog):
         self.volume.Bind(wx.EVT_SLIDER, self._on_settings_changed)
         root.Add(self.volume, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
 
-        self.ducking = wx.CheckBox(
-            self, label="Abaixar os efeitos enquanto eu &falo"
+        self.ducking = EffectToggleButton(
+            self, label="Ativar redução dos efeitos enquanto eu &falo"
         )
         self.ducking.SetValue(settings.ducking_enabled)
-        self.ducking.Bind(wx.EVT_CHECKBOX, self._on_settings_changed)
+        self.ducking.BindToggle(self._on_settings_changed)
         root.Add(self.ducking, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 12)
 
         ducking_label = wx.StaticText(self, label="&Intensidade do ducking:")
@@ -306,7 +341,7 @@ class SoundboardDialog(wx.Dialog):
         )
 
         custom_button = wx.Button(self, label="Reproduzir &arquivo de áudio...")
-        custom_button.Bind(wx.EVT_BUTTON, parent._on_browse_soundboard_file)
+        custom_button.Bind(wx.EVT_BUTTON, frame._on_browse_soundboard_file)
         root.Add(custom_button, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
 
         actions = wx.BoxSizer(wx.HORIZONTAL)
@@ -316,12 +351,10 @@ class SoundboardDialog(wx.Dialog):
         stop_button = wx.Button(self, label="&Parar todos")
         stop_button.Bind(wx.EVT_BUTTON, self._on_stop)
         actions.Add(stop_button, 1, wx.LEFT | wx.RIGHT | wx.EXPAND, 5)
-        close_button = wx.Button(self, wx.ID_CANCEL, "&Fechar")
-        actions.Add(close_button, 1, wx.LEFT | wx.EXPAND, 5)
         root.Add(actions, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
 
         self.SetSizer(root)
-        self.effect_list.SetFocus()
+        self.FitInside()
 
     def _on_play(self, _event: wx.Event) -> None:
         selection = self.effect_list.GetSelection()
@@ -483,21 +516,39 @@ class MainFrame(wx.Frame):
         self._update_cancel_event: threading.Event | None = None
         self._creative_update_queued = False
 
-        panel = wx.ScrolledWindow(self, style=wx.VSCROLL | wx.TAB_TRAVERSAL)
-        panel.SetScrollRate(0, 12)
+        panel = wx.Panel(self)
+        self.notebook = wx.Notebook(panel, style=wx.NB_TOP | wx.NB_MULTILINE)
+        self.notebook.SetName("Guias da mesa de som")
+        self.notebook.SetMinSize((1, 1))
+        pages = []
+        page_sizers = []
+        for title in ("Dispositivos", "Voz e efeitos", "Limpeza da voz", "Áudio 3D"):
+            page = wx.ScrolledWindow(
+                self.notebook, style=wx.VSCROLL | wx.TAB_TRAVERSAL
+            )
+            page.SetName(title)
+            page.SetScrollRate(0, 12)
+            page.SetMinSize((1, 1))
+            sizer = wx.BoxSizer(wx.VERTICAL)
+            page.SetSizer(sizer)
+            self.notebook.AddPage(page, title)
+            pages.append(page)
+            page_sizers.append(sizer)
+        devices_page, voice_page, cleanup_page, spatial_page = pages
+        devices_root, voice_root, cleanup_root, spatial_root = page_sizers
         root = wx.BoxSizer(wx.VERTICAL)
 
         intro = wx.StaticText(
-            panel,
+            devices_page,
             label=(
                 "Escolha o microfone físico e a saída do cabo virtual. "
                 "O Discord ou TeamTalk deve usar a outra ponta do cabo como microfone."
             ),
         )
         intro.Wrap(540)
-        root.Add(intro, 0, wx.ALL | wx.EXPAND, 12)
+        devices_root.Add(intro, 0, wx.ALL | wx.EXPAND, 12)
 
-        devices = wx.StaticBoxSizer(wx.VERTICAL, panel, "Dispositivos de áudio")
+        devices = wx.StaticBoxSizer(wx.VERTICAL, devices_page, "Dispositivos de áudio")
         box_devices = devices.GetStaticBox()
 
         input_label = wx.StaticText(box_devices, label="&Microfone de entrada:")
@@ -514,10 +565,10 @@ class MainFrame(wx.Frame):
         devices.Add(output_label, 0, wx.LEFT | wx.RIGHT, 8)
         devices.Add(self.output_choice, 0, wx.ALL | wx.EXPAND, 8)
 
-        self.monitor_checkbox = wx.CheckBox(box_devices, label="&Ouvir retorno")
+        self.monitor_checkbox = EffectToggleButton(box_devices, label="Ativar &Ouvir retorno")
         self.monitor_checkbox.SetName("Ouvir retorno do microfone processado")
         self.monitor_checkbox.SetValue(self.preferences.monitor_enabled)
-        self.monitor_checkbox.Bind(wx.EVT_CHECKBOX, self._on_monitor_toggled)
+        self.monitor_checkbox.BindToggle(self._on_monitor_toggled)
         devices.Add(self.monitor_checkbox, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 8)
 
         monitor_label = wx.StaticText(box_devices, label="Dispositivo de re&torno:")
@@ -531,14 +582,14 @@ class MainFrame(wx.Frame):
         self.refresh_button = wx.Button(box_devices, label="Atualizar dispositivos (F5)")
         self.refresh_button.Bind(wx.EVT_BUTTON, self._on_refresh)
         devices.Add(self.refresh_button, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 8)
-        root.Add(devices, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
+        devices_root.Add(devices, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
 
-        effect = wx.StaticBoxSizer(wx.VERTICAL, panel, "Reverb")
+        effect = wx.StaticBoxSizer(wx.VERTICAL, voice_page, "Reverb")
         box_effect = effect.GetStaticBox()
-        self.reverb_checkbox = wx.CheckBox(box_effect, label="Ativar &efeito de reverb")
+        self.reverb_checkbox = EffectToggleButton(box_effect, label="Ativar &efeito de reverb")
         self.reverb_checkbox.SetName("Ativar efeito de reverb")
         self.reverb_checkbox.SetValue(self.preferences.reverb_enabled)
-        self.reverb_checkbox.Bind(wx.EVT_CHECKBOX, self._on_settings_changed)
+        self.reverb_checkbox.BindToggle(self._on_settings_changed)
         level_label = wx.StaticText(box_effect, label="Nível de &reverb (0 a 100):")
         self.reverb_level = wx.Slider(
             box_effect,
@@ -553,18 +604,18 @@ class MainFrame(wx.Frame):
         effect.Add(self.reverb_checkbox, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
         effect.Add(level_label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
         effect.Add(self.reverb_level, 0, wx.ALL | wx.EXPAND, 8)
-        root.Add(effect, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
+        voice_root.Add(effect, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
 
         voice_box = wx.StaticBoxSizer(
-            wx.VERTICAL, panel, "Efeitos de voz (Modulador de tom / Pitch)"
+            wx.VERTICAL, voice_page, "Efeitos de voz (Modulador de tom / Pitch)"
         )
         box_voice = voice_box.GetStaticBox()
-        self.voice_checkbox = wx.CheckBox(
+        self.voice_checkbox = EffectToggleButton(
             box_voice, label="Ativar &modificador de voz"
         )
         self.voice_checkbox.SetName("Ativar modificador de voz")
         self.voice_checkbox.SetValue(self.preferences.voice_enabled)
-        self.voice_checkbox.Bind(wx.EVT_CHECKBOX, self._on_voice_changed)
+        self.voice_checkbox.BindToggle(self._on_voice_changed)
 
         voice_preset_label = wx.StaticText(box_voice, label="P&reset de voz:")
         self.voice_preset_choice = wx.Choice(
@@ -594,7 +645,7 @@ class MainFrame(wx.Frame):
         voice_box.Add(self.voice_preset_choice, 0, wx.ALL | wx.EXPAND, 8)
         voice_box.Add(voice_pitch_label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
         voice_box.Add(self.voice_pitch, 0, wx.ALL | wx.EXPAND, 8)
-        root.Add(voice_box, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
+        voice_root.Add(voice_box, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
         self.voice_preset_choice.SetSelection(
             next(
                 (
@@ -605,10 +656,11 @@ class MainFrame(wx.Frame):
                 0,
             )
         )
+        self._update_voice_controls()
 
         creative_box = wx.StaticBoxSizer(
             wx.VERTICAL,
-            panel,
+            voice_page,
             "Efeitos de estilo & Eco (Telefone, Megafone, Robô, Delay)",
         )
         box_creative = creative_box.GetStaticBox()
@@ -698,18 +750,18 @@ class MainFrame(wx.Frame):
             self.ambience_intensity, "Intensidade do ambiente da voz"
         )
         self.ambience_intensity.Bind(wx.EVT_SLIDER, self._on_creative_changed)
-        self.roger_beep_checkbox = wx.CheckBox(
+        self.roger_beep_checkbox = EffectToggleButton(
             box_creative, label="Ativar bipes de rádio no &início e no fim da fala"
         )
         self.roger_beep_checkbox.SetValue(self.preferences.roger_beep_enabled)
-        self.roger_beep_checkbox.Bind(wx.EVT_CHECKBOX, self._on_creative_changed)
+        self.roger_beep_checkbox.BindToggle(self._on_creative_changed)
 
-        self.delay_checkbox = wx.CheckBox(
+        self.delay_checkbox = EffectToggleButton(
             box_creative, label="Ativar &eco / delay de estádio"
         )
         self.delay_checkbox.SetName("Ativar eco de estádio")
         self.delay_checkbox.SetValue(self.preferences.delay_enabled)
-        self.delay_checkbox.Bind(wx.EVT_CHECKBOX, self._on_creative_changed)
+        self.delay_checkbox.BindToggle(self._on_creative_changed)
 
         delay_label = wx.StaticText(box_creative, label="Nível de &eco (0 a 100):")
         self.delay_level = wx.Slider(
@@ -739,37 +791,37 @@ class MainFrame(wx.Frame):
         creative_box.Add(self.delay_checkbox, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
         creative_box.Add(delay_label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
         creative_box.Add(self.delay_level, 0, wx.ALL | wx.EXPAND, 8)
-        root.Add(creative_box, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
+        voice_root.Add(creative_box, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
 
         pro_box = wx.StaticBoxSizer(
-            wx.VERTICAL, panel, "Efeitos profissionais & Equalizador de voz"
+            wx.VERTICAL, cleanup_page, "Efeitos profissionais & Equalizador de voz"
         )
         box_pro = pro_box.GetStaticBox()
-        self.compressor_checkbox = wx.CheckBox(
+        self.compressor_checkbox = EffectToggleButton(
             box_pro, label="Ativar &compressor de voz de rádio (Podcast)"
         )
         self.compressor_checkbox.SetName("Ativar compressor de voz de rádio")
         self.compressor_checkbox.SetValue(self.preferences.compressor_enabled)
-        self.compressor_checkbox.Bind(wx.EVT_CHECKBOX, self._on_pro_audio_changed)
+        self.compressor_checkbox.BindToggle(self._on_pro_audio_changed)
 
-        self.eq_checkbox = wx.CheckBox(
+        self.eq_checkbox = EffectToggleButton(
             box_pro, label="Ativar &equalizador de 3 bandas (EQ)"
         )
         self.eq_checkbox.SetName("Ativar equalizador de 3 bandas")
         self.eq_checkbox.SetValue(self.preferences.eq_enabled)
-        self.eq_checkbox.Bind(wx.EVT_CHECKBOX, self._on_pro_audio_changed)
+        self.eq_checkbox.BindToggle(self._on_pro_audio_changed)
 
         pro_toggles = (
             ("noise_gate_checkbox", "Ativar noise &gate", self.preferences.noise_gate_enabled),
             ("deesser_checkbox", "Ativar &de-esser", self.preferences.deesser_enabled),
             ("expander_checkbox", "Ativar e&xpander", self.preferences.expander_enabled),
             ("auto_gain_checkbox", "Ativar ganho &automático", self.preferences.auto_gain_enabled),
-            ("plosive_checkbox", "Filtrar sons explosivos &P/B", self.preferences.plosive_filter_enabled),
+            ("plosive_checkbox", "Ativar filtro de sons explosivos &P/B", self.preferences.plosive_filter_enabled),
         )
         for attribute, label, checked in pro_toggles:
-            checkbox = wx.CheckBox(box_pro, label=label)
+            checkbox = EffectToggleButton(box_pro, label=label)
             checkbox.SetValue(checked)
-            checkbox.Bind(wx.EVT_CHECKBOX, self._on_pro_audio_changed)
+            checkbox.BindToggle(self._on_pro_audio_changed)
             setattr(self, attribute, checkbox)
 
         eq_low_label = wx.StaticText(box_pro, label="G&raves (Bass) em dB (-12 a +12):")
@@ -779,8 +831,11 @@ class MainFrame(wx.Frame):
             minValue=-12,
             maxValue=12,
             style=wx.SL_HORIZONTAL | wx.SL_LABELS,
+            name="Intensidade de graves do equalizador, em decibéis",
         )
-        self.eq_low.SetName("Equalizador de graves")
+        self._eq_low_accessible = _set_slider_accessible_name(
+            self.eq_low, "Intensidade de graves do equalizador, em decibéis"
+        )
         self.eq_low.Enable(self.preferences.eq_enabled)
         self.eq_low.Bind(wx.EVT_SLIDER, self._on_pro_audio_changed)
 
@@ -791,8 +846,11 @@ class MainFrame(wx.Frame):
             minValue=-12,
             maxValue=12,
             style=wx.SL_HORIZONTAL | wx.SL_LABELS,
+            name="Intensidade de médios do equalizador, em decibéis",
         )
-        self.eq_mid.SetName("Equalizador de médios")
+        self._eq_mid_accessible = _set_slider_accessible_name(
+            self.eq_mid, "Intensidade de médios do equalizador, em decibéis"
+        )
         self.eq_mid.Enable(self.preferences.eq_enabled)
         self.eq_mid.Bind(wx.EVT_SLIDER, self._on_pro_audio_changed)
 
@@ -803,8 +861,11 @@ class MainFrame(wx.Frame):
             minValue=-12,
             maxValue=12,
             style=wx.SL_HORIZONTAL | wx.SL_LABELS,
+            name="Intensidade de agudos do equalizador, em decibéis",
         )
-        self.eq_high.SetName("Equalizador de agudos")
+        self._eq_high_accessible = _set_slider_accessible_name(
+            self.eq_high, "Intensidade de agudos do equalizador, em decibéis"
+        )
         self.eq_high.Enable(self.preferences.eq_enabled)
         self.eq_high.Bind(wx.EVT_SLIDER, self._on_pro_audio_changed)
 
@@ -821,13 +882,13 @@ class MainFrame(wx.Frame):
         pro_box.Add(self.eq_mid, 0, wx.ALL | wx.EXPAND, 8)
         pro_box.Add(eq_high_label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
         pro_box.Add(self.eq_high, 0, wx.ALL | wx.EXPAND, 8)
-        root.Add(pro_box, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
+        cleanup_root.Add(pro_box, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
 
         noise_reduction = wx.StaticBoxSizer(
-            wx.VERTICAL, panel, "Redução de ruído"
+            wx.VERTICAL, cleanup_page, "Redução de ruído"
         )
         box_noise = noise_reduction.GetStaticBox()
-        self.noise_reduction_checkbox = wx.CheckBox(
+        self.noise_reduction_checkbox = EffectToggleButton(
             box_noise, label="Ativar redução de ruí&do profissional"
         )
         self.noise_reduction_checkbox.SetName(
@@ -836,30 +897,28 @@ class MainFrame(wx.Frame):
         self.noise_reduction_checkbox.SetValue(
             self.preferences.noise_reduction_enabled
         )
-        self.noise_reduction_checkbox.Bind(
-            wx.EVT_CHECKBOX, self._on_noise_reduction_toggled
-        )
+        self.noise_reduction_checkbox.BindToggle(self._on_noise_reduction_toggled)
         noise_reduction.Add(
             self.noise_reduction_checkbox,
             0,
             wx.LEFT | wx.RIGHT | wx.TOP | wx.BOTTOM,
             8,
         )
-        root.Add(
+        cleanup_root.Add(
             noise_reduction,
             0,
             wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND,
             12,
         )
 
-        spatial = wx.StaticBoxSizer(wx.VERTICAL, panel, "Áudio espacial binaural")
+        spatial = wx.StaticBoxSizer(wx.VERTICAL, spatial_page, "Áudio espacial binaural")
         box_spatial = spatial.GetStaticBox()
-        self.spatial_checkbox = wx.CheckBox(
+        self.spatial_checkbox = EffectToggleButton(
             box_spatial, label="Ativar áudio es&pacial 3D com HRTF"
         )
         self.spatial_checkbox.SetName("Ativar áudio espacial binaural com HRTF")
         self.spatial_checkbox.SetValue(self.preferences.spatial_enabled)
-        self.spatial_checkbox.Bind(wx.EVT_CHECKBOX, self._on_spatial_changed)
+        self.spatial_checkbox.BindToggle(self._on_spatial_changed)
         spatial.Add(self.spatial_checkbox, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
 
         coordinates = wx.FlexGridSizer(cols=2, vgap=5, hgap=8)
@@ -895,7 +954,7 @@ class MainFrame(wx.Frame):
             coordinates.Add(control, 1, wx.EXPAND)
         spatial.Add(coordinates, 0, wx.ALL | wx.EXPAND, 8)
 
-        self.spatial_automatic = wx.CheckBox(
+        self.spatial_automatic = EffectToggleButton(
             box_spatial,
             label="Ativar movimento a&utomático pelos três eixos",
         )
@@ -927,9 +986,15 @@ class MainFrame(wx.Frame):
             self.spatial_speed,
         ):
             control.Bind(wx.EVT_SPINCTRL, self._on_spatial_changed)
-        self.spatial_automatic.Bind(wx.EVT_CHECKBOX, self._on_spatial_changed)
+        self.spatial_automatic.BindToggle(self._on_spatial_changed)
         self._set_spatial_controls_enabled()
-        root.Add(spatial, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
+        spatial_root.Add(spatial, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
+
+        self.soundboard_panel = SoundboardPanel(self.notebook, self)
+        self.notebook.AddPage(self.soundboard_panel, "Sons e vinhetas")
+        for page in pages:
+            page.FitInside()
+        root.Add(self.notebook, 1, wx.ALL | wx.EXPAND, 8)
 
         actions = wx.BoxSizer(wx.HORIZONTAL)
         self.toggle_button = wx.Button(panel, label="&Ativar mesa")
@@ -954,7 +1019,10 @@ class MainFrame(wx.Frame):
         root.Add(self.status, 0, wx.ALL | wx.EXPAND, 12)
 
         panel.SetSizer(root)
-        panel.FitInside()
+        frame_root = wx.BoxSizer(wx.VERTICAL)
+        frame_root.Add(panel, 1, wx.EXPAND)
+        self.SetSizer(frame_root)
+        self.Bind(wx.EVT_CHAR_HOOK, self._on_navigation_key)
         self.CreateStatusBar()
         self.SetStatusText("F5 atualiza a lista de dispositivos.")
 
@@ -1042,6 +1110,56 @@ class MainFrame(wx.Frame):
         if can_self_update():
             wx.CallLater(3000, self._start_update_check, False)
 
+    def _focus_control(self, control: wx.Window) -> None:
+        """Reveal a shortcut's page before focusing its native control."""
+        for index in range(self.notebook.GetPageCount()):
+            page = self.notebook.GetPage(index)
+            if page is control or page.IsDescendant(control):
+                self.notebook.SetSelection(index)
+                break
+        if control.IsEnabled():
+            control.SetFocus()
+        else:
+            self.notebook.SetFocus()
+
+    def _on_navigation_key(self, event: wx.KeyEvent) -> None:
+        key = event.GetKeyCode()
+        if event.ControlDown() and not event.AltDown() and key == wx.WXK_TAB:
+            step = -1 if event.ShiftDown() else 1
+            index = (self.notebook.GetSelection() + step) % self.notebook.GetPageCount()
+            self.notebook.SetSelection(index)
+            self.notebook.SetFocus()
+            return
+        if event.AltDown() and not event.ControlDown() and not event.ShiftDown():
+            shortcuts = {
+                ord("M"): self.input_choice,
+                ord("S"): self.output_choice,
+                ord("O"): self.monitor_checkbox,
+                ord("T"): self.monitor_choice,
+                ord("E"): self.reverb_checkbox,
+                ord("R"): self.reverb_level,
+                ord("D"): self.noise_reduction_checkbox,
+                ord("P"): self.spatial_checkbox,
+                ord("X"): self.spatial_x,
+                ord("Y"): self.spatial_y,
+                ord("Z"): self.spatial_z,
+                ord("U"): self.spatial_automatic,
+                ord("V"): self.spatial_speed,
+            }
+            control = shortcuts.get(key)
+            if control is not None:
+                self._focus_control(control)
+                if isinstance(control, EffectToggleButton):
+                    control.Activate()
+                return
+            if key == ord("A"):
+                self._on_toggle(event)
+                return
+            if key == ord("C"):
+                self._on_exit(event)
+                return
+        event.Skip()
+
     def _on_check_for_updates(self, _event: wx.Event) -> None:
         self._start_update_check(True)
 
@@ -1053,11 +1171,7 @@ class MainFrame(wx.Frame):
             dialog.Destroy()
 
     def _on_open_soundboard(self, _event: wx.Event) -> None:
-        dialog = SoundboardDialog(self)
-        try:
-            dialog.ShowModal()
-        finally:
-            dialog.Destroy()
+        self._focus_control(self.soundboard_panel.effect_list)
 
     def play_sound_effect(self, effect_id: str) -> None:
         try:
@@ -1264,7 +1378,7 @@ class MainFrame(wx.Frame):
             "3. No aplicativo de conversa, escolha a gravação do mesmo cabo "
             "como microfone, por exemplo CABLE Output ou Line 1.\n"
             "4. Ajuste os efeitos e pressione Ativar mesa.\n\n"
-            "Para ouvir sua própria voz, marque Ouvir retorno e use fones de "
+            "Para ouvir sua própria voz, ative Ouvir retorno e use fones de "
             "ouvido para evitar microfonia. Faça um teste de gravação no "
             "aplicativo de conversa antes de entrar em uma chamada. Todos os "
             "controles podem ser operados pelo teclado e são compatíveis com "
@@ -1506,11 +1620,9 @@ class MainFrame(wx.Frame):
         event.Skip()
 
     def _on_voice_changed(self, event: wx.Event) -> None:
-        enabled = self.voice_checkbox.GetValue()
-        self.voice_preset_choice.Enable(enabled)
-        self.voice_pitch.Enable(enabled)
         if event.GetEventObject() is self.voice_pitch:
             self.voice_preset_choice.SetSelection(len(_VOICE_PRESETS) - 1)
+        self._update_voice_controls()
         try:
             if self.engine.is_running:
                 self.engine.update_voice_settings(self._current_voice_settings())
@@ -1518,6 +1630,11 @@ class MainFrame(wx.Frame):
             self._save_preferences()
         except Exception as exc:
             self._show_error(f"Não foi possível alterar o efeito de voz.\n\n{exc}")
+
+    def _update_voice_controls(self) -> None:
+        enabled = self.voice_checkbox.GetValue()
+        self.voice_preset_choice.Enable(enabled)
+        self.voice_pitch.Enable(enabled)
 
     def _on_voice_preset_selected(self, _event: wx.Event) -> None:
         selection = self.voice_preset_choice.GetSelection()

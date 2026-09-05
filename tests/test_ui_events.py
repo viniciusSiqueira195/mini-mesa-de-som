@@ -21,6 +21,40 @@ class _FakeEvent:
         return self.key_code
 
 
+class _FakeControl:
+    def __init__(self, *, value: bool = False, selection: int = 0) -> None:
+        self.value = value
+        self.selection = selection
+        self.enabled = True
+
+    def GetValue(self) -> bool:
+        return self.value
+
+    def GetSelection(self) -> int:
+        return self.selection
+
+    def Enable(self, enabled: bool) -> None:
+        self.enabled = enabled
+
+
+class VoiceControlTests(unittest.TestCase):
+    def test_removed_voice_presets_are_not_offered(self) -> None:
+        presets = [value for value, _label, _pitch in ui._VOICE_PRESETS]
+        self.assertNotIn("autotune", presets)
+        self.assertNotIn("vocoder", presets)
+
+    def test_voice_controls_follow_enabled_state(self) -> None:
+        for enabled in (True, False):
+            frame = types.SimpleNamespace(
+                voice_checkbox=_FakeControl(value=enabled),
+                voice_preset_choice=_FakeControl(),
+                voice_pitch=_FakeControl(),
+            )
+            ui.MainFrame._update_voice_controls(frame)
+            self.assertEqual(frame.voice_preset_choice.enabled, enabled)
+            self.assertEqual(frame.voice_pitch.enabled, enabled)
+
+
 class CreativeChoiceEventTests(unittest.TestCase):
     @staticmethod
     def _frame(applied: list[str]):
