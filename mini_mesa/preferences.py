@@ -165,6 +165,10 @@ class AppPreferences:
             "voice_preset",
             legacy_voice_presets.get(voice_pitch, "custom"),
         )
+        removed_voice_preset = voice_preset in ("autotune", "vocoder")
+        if removed_voice_preset:
+            voice_preset = "custom"
+            voice_pitch = 0.0
         if voice_preset not in VALID_VOICE_PRESETS:
             voice_preset = defaults.voice_preset
         modulation = text_value("modulation_effect", defaults.modulation_effect)
@@ -227,7 +231,7 @@ class AppPreferences:
                 "spatial_automatic", defaults.spatial_automatic
             ),
             spatial_speed=spatial_speed,
-            voice_enabled=bool_value("voice_enabled", defaults.voice_enabled),
+            voice_enabled=bool_value("voice_enabled", defaults.voice_enabled) and not removed_voice_preset,
             voice_preset=voice_preset,
             voice_pitch_semitones=voice_pitch,
             creative_effect_preset=preset,
@@ -300,7 +304,7 @@ class PreferencesStore:
         try:
             with temporary_path.open("w", encoding="utf-8", newline="\n") as output:
                 json.dump(
-                    {"schema_version": 7, **asdict(preferences)},
+                    {"schema_version": 8, **asdict(preferences)},
                     output,
                     ensure_ascii=False,
                     indent=2,

@@ -10,7 +10,6 @@ import numpy as np
 from mini_mesa.audio_engine import (
     AudioEngine,
     PedalboardBackend,
-    _AutoTuneProcessor,
     _BufferedAudioOutput,
     _HOST_API_RANKS,
     _MONITOR_API_RANKS,
@@ -788,6 +787,54 @@ class PedalboardProcessingTests(unittest.TestCase):
         self.assertIn("HighShelfFilter", effect_names)
         self.assertIn("Gain", effect_names)
 
+    def test_eq_updates_preserve_running_effects_and_delay_tail(self) -> None:
+        backend = self._backend_with_dry_reverb()
+        backend.update_creative_effects(CreativeEffectSettings(
+            delay_enabled=True, delay_level_percent=60,
+        ))
+        chain = backend._effects
+        transform = backend._realtime_transform
+        impulse = np.zeros((1, 256), dtype=np.float32)
+        impulse[0, 0] = 0.5
+        chain.process(impulse, 48000, reset=False)
+        with patch.object(backend, "_rebuild_effects_chain", wraps=backend._rebuild_effects_chain) as rebuild:
+            for enabled, gain in ((True, 0.0), (True, 6.0), (False, 6.0)):
+                backend.update_pro_audio(ProAudioSettings(eq_enabled=enabled, eq_low_db=gain))
+            rebuild.assert_not_called()
+        self.assertIs(backend._effects, chain)
+        self.assertIs(backend._realtime_transform, transform)
+        tail = np.concatenate([
+            chain.process(np.zeros((1, 256), dtype=np.float32), 48000,
+                          buffer_size=256, reset=False)
+            for _ in range(200)
+        ], axis=1)
+        self.assertGreater(float(np.max(abs(tail))), 0.01)
+
+    def test_eq_gain_ramps_without_gaps_and_returns_to_neutral(self) -> None:
+        backend = self._backend_with_dry_reverb()
+        eq = backend._equalizer
+        source = np.full((1, 4800), 0.05, dtype=np.float32)
+        eq.process(source, 48000, reset=False)
+        backend.update_pro_audio(ProAudioSettings(eq_enabled=True, eq_low_db=12.0))
+        first = eq.process(source[:, :64], 48000, reset=False)
+        self.assertGreater(eq._gains[0], 0)
+        self.assertLess(eq._gains[0], 12)
+        rest = eq.process(source, 48000, reset=False)
+        combined = np.concatenate((first, rest), axis=1)
+        self.assertTrue(np.isfinite(combined).all())
+        self.assertGreater(float(combined.min()), 0.04)
+        self.assertLess(float(np.max(abs(np.diff(combined)))), 0.01)
+        self.assertAlmostEqual(float(rest[0, -1]), 0.05 * 10 ** (12 / 20), delta=0.002)
+        backend.update_pro_audio(ProAudioSettings(eq_enabled=False, eq_low_db=12.0))
+        neutral = eq.process(source, 48000, reset=False)
+        self.assertAlmostEqual(float(neutral[0, -1]), 0.05, delta=0.001)
+
+    def test_non_eq_pro_settings_still_update_chain(self) -> None:
+        backend = self._backend_with_dry_reverb()
+        backend.update_pro_audio(ProAudioSettings())
+        backend.update_pro_audio(ProAudioSettings(compressor_enabled=True, eq_enabled=True, eq_mid_db=3.0))
+        self.assertIn("Compressor", [type(effect).__name__ for effect in backend._effects])
+
         backend.update_voice_effect(VoiceSettings(enabled=True, preset="female"))
         self.assertIsNotNone(backend._pitch_shifter)
         backend.deactivate()
@@ -967,36 +1014,12 @@ class PedalboardProcessingTests(unittest.TestCase):
         backend = self._backend_with_dry_reverb()
         for preset in VALID_VOICE_PRESETS:
             backend.update_voice_effect(VoiceSettings(enabled=True, preset=preset))
-            if preset == "vocoder":
-                self.assertIsNone(backend._pitch_shifter)
-            elif preset == "custom":
+            if preset == "custom":
                 self.assertIsNotNone(backend._pitch_shifter)
             else:
                 self.assertIsNotNone(backend._pitch_shifter, preset)
         if backend._pitch_shifter is not None:
             backend._pitch_shifter.close()
-
-    def test_autotune_moves_pitch_to_the_nearest_chromatic_note(self) -> None:
-        backend = PedalboardBackend()
-        sample_rate = 48_000
-        sample_count = 4096
-        timeline = np.arange(sample_count, dtype=np.float32) / sample_rate
-        source = (0.10 * np.sin(2 * np.pi * 230.0 * timeline)).astype(np.float32)
-        processor = _AutoTuneProcessor(
-            np, backend._Pedalboard, backend._PitchShift
-        )
-
-        rendered = np.asarray(
-            processor.process(source[None, :], sample_rate)
-        ).reshape(-1)
-        frequencies = np.fft.rfftfreq(sample_count, 1.0 / sample_rate)
-        peak_hz = float(
-            frequencies[np.argmax(np.abs(np.fft.rfft(rendered)))]
-        )
-
-        self.assertGreater(float(np.sqrt(np.mean(rendered * rendered))), 0.02)
-        self.assertGreater(peak_hz, 225.0)
-        self.assertLess(peak_hz, 240.0)
 
     def test_noise_reduction_runs_before_reverb_effects(self) -> None:
         class FakeNoiseReducer:

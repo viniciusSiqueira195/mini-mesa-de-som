@@ -138,9 +138,8 @@ VALID_VOICE_PRESETS = (
     "harmony_third",
     "harmony_fifth",
     "harmony_octave",
-    "autotune",
-    "vocoder",
 )
+
 
 VALID_CREATIVE_PRESETS = (
     "none",
