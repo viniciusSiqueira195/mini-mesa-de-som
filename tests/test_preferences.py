@@ -34,7 +34,7 @@ class PreferencesStoreTests(unittest.TestCase):
 
             self.assertEqual(store.load(), expected)
             saved = json.loads(path.read_text(encoding="utf-8"))
-            self.assertEqual(saved["schema_version"], 8)
+            self.assertEqual(saved["schema_version"], 11)
             self.assertEqual(saved["input_device"], "Microfone Áudio")
 
     def test_invalid_file_falls_back_to_defaults(self) -> None:

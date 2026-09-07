@@ -1,8 +1,11 @@
 #define AppName "Mini Mesa de Som"
-#define AppVersion "1.0.0"
+#define AppVersion "1.1.0"
 #define AppPublisher "Vinicius Siqueira"
 #define AppURL "https://github.com/viniciusSiqueira195/mini-mesa-de-som"
 #define AppExeName "MiniMesaDeSom.exe"
+#ifndef AppDistDir
+  #define AppDistDir "..\dist\MiniMesaDeSom"
+#endif
 
 [Setup]
 AppId={{D5463387-E281-4AF8-92E9-A504632810B1}
@@ -12,7 +15,7 @@ AppPublisher={#AppPublisher}
 AppPublisherURL={#AppURL}
 AppSupportURL={#AppURL}
 AppUpdatesURL={#AppURL}
-VersionInfoVersion=1.0.0.0
+VersionInfoVersion=1.1.0.0
 VersionInfoCompany={#AppPublisher}
 VersionInfoDescription=Mesa de som virtual acessível com efeitos em tempo real
 VersionInfoProductName={#AppName}
@@ -40,7 +43,7 @@ Name: "desktopicon"; Description: "Criar atalho na área de trabalho"; GroupDesc
 Name: "vbcable"; Description: "Instalar o VB-CABLE oficial (recomendado)"; GroupDescription: "Driver de áudio virtual:"; Flags: checkedonce
 
 [Files]
-Source: "..\dist\MiniMesaDeSom\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#AppDistDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "VB-CABLE-NOTICE.txt"; DestDir: "{app}\licenses"; Flags: ignoreversion
 Source: "AudioDeviceCmdlets-NOTICE.txt"; DestDir: "{app}\licenses"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion

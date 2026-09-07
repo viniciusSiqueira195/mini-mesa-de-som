@@ -34,6 +34,13 @@ try {
         throw "O PyInstaller não conseguiu gerar o aplicativo."
     }
 
+    & $python .\tools\verify_frozen_app.py `
+        --executable .\dist\MiniMesaDeSom\MiniMesaDeSom.exe `
+        --result .\build\frozen-self-test.json
+    if ($LASTEXITCODE -ne 0) {
+        throw "O executável empacotado falhou no autoteste. Instalador não será gerado."
+    }
+
     if (-not $SkipDependencyDownload) {
         & .\installer\prepare_dependencies.ps1
     }

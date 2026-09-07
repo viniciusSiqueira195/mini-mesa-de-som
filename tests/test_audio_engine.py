@@ -40,6 +40,9 @@ from mini_mesa.soundboard import SoundEffectInfo
 
 
 class FakeStream:
+    def set_monitor_voice(self, enabled: bool) -> None:
+        self.monitor_voice = enabled
+
     def __init__(self, *, run_error: Exception | None = None) -> None:
         self.closed = threading.Event()
         self.started = threading.Event()
@@ -99,7 +102,9 @@ class FakeBackend:
         output_device: str,
         settings: ReverbSettings,
         monitor_output: str | None = None,
+        *, monitor_voice: bool = True,
     ) -> FakeStream:
+        self.stream.set_monitor_voice(monitor_voice)
         self.created_with = (input_device, output_device, settings, monitor_output)
         return self.stream
 
@@ -1525,3 +1530,66 @@ class AudioEngineTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EffectsOnlyMonitoringTests(unittest.TestCase):
+    def test_real_sound_reaches_both_routes_but_microphone_only_reaches_recording(self):
+        import tempfile
+        from pathlib import Path
+        import soundfile as sf
+        backend = PedalboardProcessingTests._backend_with_dry_reverb()
+        backend.update_creative_effects(CreativeEffectSettings())
+        backend.update_soundboard(SoundboardSettings(volume_percent=100))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "effect.wav"
+            sf.write(path, np.full(1536, 0.2, dtype=np.float32), 48000)
+            self.assertTrue(backend.play_sound(str(path)))
+        stream = _MultiOutputSoundDeviceStream(
+            sounddevice=FakeSoundDevice(), input_id=1, outputs=[(2, 2), (3, 2)],
+            sample_rate=48000, input_channels=1, block_size=512,
+            processor=backend._process_audio,
+            effects_processor=lambda: backend._effects_monitor_audio,
+            monitor_voice=False,
+        )
+        try:
+            microphone = np.full((512, 1), 0.1, dtype=np.float32)
+            stream._on_input(microphone, 512, None, None)
+            primary, monitor = stream._outputs
+            np.testing.assert_allclose(monitor._chunks[-1], 0.2, atol=0.0001)
+            self.assertGreater(float(np.mean(primary._chunks[-1])), 0.2)
+            stream.set_monitor_voice(True)
+            self.assertEqual(monitor._queued_frames, 0)
+            stream._on_input(microphone, 512, None, None)
+            np.testing.assert_array_equal(primary._chunks[-1], monitor._chunks[-1])
+            stream.set_monitor_voice(False)
+            self.assertEqual(monitor._queued_frames, 0)
+            stream._on_input(microphone, 512, None, None)
+            np.testing.assert_allclose(monitor._chunks[-1], 0.2, atol=0.0001)
+            stream._on_input(microphone, 512, None, None)
+            self.assertFalse(np.any(monitor._chunks[-1]))
+            self.assertTrue(np.any(primary._chunks[-1]))
+        finally:
+            stream.close()
+            backend.deactivate()
+
+    def test_engine_keeps_local_device_open_when_voice_return_is_toggled(self):
+        backend = FakeBackend()
+        engine = AudioEngine(backend)
+        try:
+            engine.start("FIFINE AM8", "CABLE Input", effects_output="Alto-falantes")
+            self.assertEqual(backend.created_with[3], "Alto-falantes")
+            self.assertFalse(backend.stream.monitor_voice)
+            engine.update_monitor("Alto-falantes")
+            self.assertTrue(backend.stream.monitor_voice)
+            engine.update_monitor(None)
+            self.assertFalse(backend.stream.monitor_voice)
+            self.assertEqual(backend.updated_monitors, [])
+            engine.update_monitor(None, effects_output="Fones")
+            self.assertEqual(backend.updated_monitors, ["Fones"])
+        finally:
+            engine.stop()
+
+    def test_effects_cannot_be_routed_back_to_virtual_cable(self):
+        engine = AudioEngine(FakeBackend())
+        with self.assertRaisesRegex(ValueError, "diferente da saída virtual"):
+            engine.start("FIFINE AM8", "CABLE Input", effects_output="CABLE Input")

@@ -4,16 +4,24 @@ import json
 import sys
 from pathlib import Path
 
-import numpy as np
-
 from mini_mesa.__main__ import main
 
 
 def _self_test(result_path: Path) -> int:
     result: dict[str, object] = {"ok": False}
     reducer = None
+    backend = None
+    frame = None
     try:
-        from mini_mesa.audio_engine import PedalboardBackend
+        import tempfile
+        import numpy as np
+        import soundfile as sf
+        import sounddevice as sd
+        import wx
+        from mini_mesa import ui
+        from mini_mesa.preferences import AppPreferences, PreferencesStore
+        from mini_mesa.soundboard import SoundboardMixer
+        from mini_mesa.audio_engine import AudioEngine, PedalboardBackend
         from mini_mesa.noise_reduction import RNNOISE_FRAME_SIZE, RNNoiseReducer
         from mini_mesa.settings import SpatialSettings
         from mini_mesa.spatial_audio import HRTFSpatializer
@@ -28,10 +36,38 @@ def _self_test(result_path: Path) -> int:
             raise RuntimeError("O RNNoise retornou um bloco com tamanho inválido.")
 
         spatializer = HRTFSpatializer(48_000)
-        spatializer.update(SpatialSettings(enabled=True, angle_degrees=45))
+        spatializer.update(SpatialSettings(enabled=True, x=71, z=71))
         spatial = spatializer.process(np.zeros(480, dtype=np.float32))
         if spatial.shape != (480, 2):
             raise RuntimeError("O HRTF retornou um bloco com formato inválido.")
+
+        from mini_mesa.release_notes import load_release_notes
+        if not load_release_notes().strip():
+            raise RuntimeError("O arquivo de novidades está vazio.")
+        document = ui._load_project_markdown()
+        if not document or "<h1" not in ui._markdown_to_help_html(document):
+            raise RuntimeError("A ajuda ou suas extensões Markdown não foram empacotadas.")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for extension in ("wav", "flac", "ogg", "mp3"):
+                path = root / f"probe.{extension}"
+                sf.write(path, np.sin(np.arange(4800) * 0.1).astype(np.float32) * 0.1, 48000)
+                mixer = SoundboardMixer()
+                if not mixer.play(str(path)) or not np.any(mixer.mix(4800)):
+                    raise RuntimeError(f"O codec {extension} não funciona no pacote.")
+            store = PreferencesStore(root / "preferences.json")
+            store.save(AppPreferences(welcome_shown=True, last_seen_news_version=ui.__version__))
+            app = wx.App.Get() or wx.App(False)
+            original_tray, original_update = ui.SystemTrayIcon, ui.can_self_update
+            try:
+                ui.SystemTrayIcon = lambda _frame: None
+                ui.can_self_update = lambda: False
+                frame = ui.MainFrame(AudioEngine(backend), preferences_store=store)
+                frame.Destroy()
+                frame = None
+                app.ProcessPendingEvents()
+            finally:
+                ui.SystemTrayIcon, ui.can_self_update = original_tray, original_update
 
         result.update(
             ok=True,
@@ -40,12 +76,23 @@ def _self_test(result_path: Path) -> int:
             pedalboard=True,
             rnnoise=True,
             hrtf=True,
+            interface=True,
+            help=True,
+            release_notes=True,
+            codecs=["wav", "mp3", "flac", "ogg"],
+            device_inventory=[dict(device) for device in sd.query_devices()],
+            host_apis=[dict(api) for api in sd.query_hostapis()],
+            monitor_devices=list(backend.monitor_devices()),
         )
         return_code = 0
     except Exception as exc:
         result.update(error=f"{type(exc).__name__}: {exc}")
         return_code = 1
     finally:
+        if frame is not None:
+            frame.Destroy()
+        if backend is not None:
+            backend.deactivate()
         if reducer is not None:
             reducer.close()
         result_path.parent.mkdir(parents=True, exist_ok=True)

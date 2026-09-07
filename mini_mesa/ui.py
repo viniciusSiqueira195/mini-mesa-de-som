@@ -10,8 +10,11 @@ import wx.adv
 import wx.html2
 from markdown import markdown as render_markdown
 
+from . import __version__
+from .release_notes import load_release_notes
 from .audio_engine import AudioDependencyError, AudioEngine, match_device_label
-from .preferences import AppPreferences, PreferencesStore
+from .preferences import AppPreferences, PersonalSound, PreferencesStore
+from .soundboard import SoundEffectError, validate_custom_audio
 from .settings import (
     CreativeEffectSettings,
     ProAudioSettings,
@@ -195,6 +198,7 @@ class SystemTrayIcon(wx.adv.TaskBarIcon):
         icon = wx.ArtProvider.GetIcon(wx.ART_EXECUTABLE_FILE, wx.ART_OTHER, (16, 16))
         self._available = bool(self.SetIcon(icon, "Mini Mesa de Som"))
         self.Bind(wx.adv.EVT_TASKBAR_LEFT_UP, self._on_restore)
+        self.Bind(wx.adv.EVT_TASKBAR_LEFT_DCLICK, self._on_restore)
         self.Bind(wx.EVT_MENU, self._on_restore, id=self._restore_id)
         self.Bind(wx.EVT_MENU, self._on_exit, id=self._exit_id)
 
@@ -209,15 +213,14 @@ class SystemTrayIcon(wx.adv.TaskBarIcon):
     def is_available(self) -> bool:
         return self._available and self.IsIconInstalled()
 
-    def notify_minimized(self, running: bool) -> None:
+    def notify_minimized(self) -> None:
         if not self.is_available:
             return
-        state = "A mesa continua ativa." if running else "O programa continua aberto."
         try:
             self.ShowBalloon(
-                "Mini Mesa de Som",
-                f"Janela minimizada para a bandeja. {state}",
-                3000,
+                "Mini Mesa minimizada",
+                "A Mini Mesa está minimizada. Você pode restaurá-la pela bandeja do sistema.",
+                5000,
                 wx.ICON_INFORMATION,
             )
         except (AttributeError, wx.wxAssertionError):
@@ -273,24 +276,40 @@ class SoundboardPanel(wx.ScrolledWindow):
         self.SetScrollRate(0, 12)
         self.SetMinSize((1, 1))
         self._frame = frame
-        self._effects = frame.engine.sound_effects()
+        self._all_effects = list(frame.preferences.personal_sounds)
+        self._page = frame.preferences.selected_sound_page
+        self._effects = [effect for effect in self._all_effects if effect.page == self._page]
 
         root = wx.BoxSizer(wx.VERTICAL)
         instructions = wx.StaticText(
             self,
             label=(
-                "Escolha um efeito. Enter reproduz, Espaço interrompe todos e "
-                "Ctrl+Tab muda de guia."
+                "Escolha a página e adicione seus sons. "
+                "Na lista, a tecla Aplicações ou Shift+F10 abre as ações do efeito."
             ),
         )
         instructions.Wrap(430)
         root.Add(instructions, 0, wx.ALL | wx.EXPAND, 12)
 
+        root.Add(wx.StaticText(self, label="Página de efeitos:"), 0, wx.LEFT | wx.RIGHT, 12)
+        self.page_choice = wx.Choice(self, choices=[
+            f"Página {number}" for number in range(1, 11)
+        ])
+        self.page_choice.SetName("Página de efeitos")
+        self.page_choice.SetSelection(self._page)
+        self.page_choice.Bind(wx.EVT_CHOICE, self._on_page_changed)
+        root.Add(self.page_choice, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
+
+        custom_button = wx.Button(self, label="&Adicionar efeito de áudio... (F6)")
+        self.add_button = custom_button
+        custom_button.Bind(wx.EVT_BUTTON, frame._on_browse_soundboard_file)
+        root.Add(custom_button, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
+
         self.effect_list = wx.ListBox(
             self,
             choices=[
-                f"{effect.name}; {effect.description}; atalho {effect.shortcut}"
-                for effect in self._effects
+                self._effect_label(index, effect)
+                for index, effect in enumerate(self._effects)
             ],
         )
         self.effect_list.SetName("Lista de efeitos sonoros")
@@ -298,7 +317,22 @@ class SoundboardPanel(wx.ScrolledWindow):
             self.effect_list.SetSelection(0)
         self.effect_list.Bind(wx.EVT_LISTBOX_DCLICK, self._on_play)
         self.effect_list.Bind(wx.EVT_KEY_DOWN, self._on_key_down)
+        self.effect_list.Bind(wx.EVT_CONTEXT_MENU, self._on_context_menu)
         root.Add(self.effect_list, 1, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
+
+        self.actions_button = wx.Button(self, label="Ações do efeito...")
+        self.actions_button.Bind(wx.EVT_BUTTON, self._show_effect_menu)
+        root.Add(self.actions_button, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
+
+        actions = wx.BoxSizer(wx.HORIZONTAL)
+        play_button = wx.Button(self, label="&Reproduzir")
+        self.play_button = play_button
+        play_button.Bind(wx.EVT_BUTTON, self._on_play)
+        actions.Add(play_button, 1, wx.RIGHT | wx.EXPAND, 5)
+        stop_button = wx.Button(self, label="&Parar todos")
+        stop_button.Bind(wx.EVT_BUTTON, self._on_stop)
+        actions.Add(stop_button, 1, wx.LEFT | wx.RIGHT | wx.EXPAND, 5)
+        root.Add(actions, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
 
         settings = frame.soundboard_settings
         volume_label = wx.StaticText(self, label="&Volume dos efeitos, de 0 a 100:")
@@ -340,26 +374,177 @@ class SoundboardPanel(wx.ScrolledWindow):
             12,
         )
 
-        custom_button = wx.Button(self, label="Reproduzir &arquivo de áudio...")
-        custom_button.Bind(wx.EVT_BUTTON, frame._on_browse_soundboard_file)
-        root.Add(custom_button, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
-
-        actions = wx.BoxSizer(wx.HORIZONTAL)
-        play_button = wx.Button(self, label="&Reproduzir")
-        play_button.Bind(wx.EVT_BUTTON, self._on_play)
-        actions.Add(play_button, 1, wx.RIGHT | wx.EXPAND, 5)
-        stop_button = wx.Button(self, label="&Parar todos")
-        stop_button.Bind(wx.EVT_BUTTON, self._on_stop)
-        actions.Add(stop_button, 1, wx.LEFT | wx.RIGHT | wx.EXPAND, 5)
-        root.Add(actions, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
-
         self.SetSizer(root)
         self.FitInside()
+        self._refresh_effects()
+
+    @staticmethod
+    def _effect_label(index: int, effect: PersonalSound) -> str:
+        shortcut = f"; Ctrl+{(index + 1) % 10}" if index < 10 else ""
+        return f"{effect.name}{shortcut}"
+
+    def _refresh_effects(self, selection: int = 0) -> None:
+        self.effect_list.Set([
+            self._effect_label(index, effect)
+            for index, effect in enumerate(self._effects)
+        ])
+        if self._effects:
+            self.effect_list.SetSelection(min(max(selection, 0), len(self._effects) - 1))
+        for button in (self.actions_button, self.play_button):
+            button.Enable(bool(self._effects))
+        self.add_button.SetLabel(f"&Adicionar efeitos, página {self._page + 1}... (F6)")
+        self.add_button.SetName(f"Adicionar efeitos, página {self._page + 1}")
+        self.add_button.Enable(len(self._effects) < 10)
+        self.effect_list.SetName(
+            f"Página {self._page + 1}. Lista de efeitos sonoros"
+            + ("" if self._effects else " vazia. Pressione F6 para adicionar.")
+        )
+
+    def _commit_effects(self, effects: list[PersonalSound], selection: int) -> bool:
+        all_effects = [effect for effect in self._all_effects if effect.page != self._page]
+        all_effects.extend(effects)
+        preferences = replace(self._frame._current_preferences(), personal_sounds=tuple(all_effects))
+        try:
+            self._frame.preferences_store.save(preferences)
+        except OSError as exc:
+            self._frame._show_error(f"Não foi possível salvar os efeitos.\n\n{exc}")
+            return False
+        self._frame.preferences = preferences
+        self._all_effects = all_effects
+        self._effects = effects
+        self._refresh_effects(selection)
+        (self.effect_list if effects else self.add_button).SetFocus()
+        return True
+
+    def _on_page_changed(self, _event: wx.Event) -> None:
+        self.select_page(self.page_choice.GetSelection(), focus=False)
+
+    def select_page(self, page: int, *, focus: bool = True) -> None:
+        if not 0 <= page < 10:
+            return
+        preferences = replace(self._frame._current_preferences(), selected_sound_page=page)
+        try:
+            self._frame.preferences_store.save(preferences)
+        except OSError as exc:
+            self.page_choice.SetSelection(self._page)
+            self._frame._show_error(f"Não foi possível salvar a página escolhida.\n\n{exc}")
+            return
+        self._frame.preferences = preferences
+        self._page = page
+        self.page_choice.SetSelection(page)
+        self._effects = [effect for effect in self._all_effects if effect.page == page]
+        self._refresh_effects()
+        if focus:
+            self._frame._focus_control(self.effect_list if self._effects else self.add_button)
+        self._frame.SetStatusText(f"Página {page + 1} de 10; {len(self._effects)} efeitos.")
+
+    def _choose_file(self) -> str | None:
+        with wx.FileDialog(
+            self, "Escolha um arquivo para o painel de efeitos",
+            wildcard="Arquivos de áudio (*.wav;*.mp3;*.flac;*.ogg)|*.wav;*.mp3;*.flac;*.ogg",
+            style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST,
+        ) as dialog:
+            if dialog.ShowModal() != wx.ID_OK:
+                return None
+            path = str(Path(dialog.GetPath()).resolve())
+        try:
+            validate_custom_audio(Path(path))
+        except (OSError, SoundEffectError) as exc:
+            self._frame._show_error(str(exc))
+            return None
+        return path
+
+    def _on_add(self, _event: wx.Event) -> None:
+        if len(self._effects) >= 10:
+            self._frame._show_error("Esta página já tem dez efeitos. Escolha outra página ou remova um efeito.")
+            return
+        path = self._choose_file()
+        if path is not None:
+            effects = [*self._effects, PersonalSound(Path(path).stem, path, self._page)]
+            if self._commit_effects(effects, len(effects) - 1):
+                self._frame.SetStatusText(f"Efeito adicionado: {effects[-1].name}.")
+
+    def _on_rename(self, _event: wx.Event) -> None:
+        index = self.effect_list.GetSelection()
+        if index == wx.NOT_FOUND:
+            return
+        with wx.TextEntryDialog(self, "Nome do efeito:", "Renomear efeito", self._effects[index].name) as dialog:
+            if dialog.ShowModal() != wx.ID_OK:
+                return
+            name = dialog.GetValue().strip()
+        if not name:
+            self._frame._show_error("Digite um nome para o efeito.")
+            return
+        effects = self._effects.copy()
+        effects[index] = replace(effects[index], name=name)
+        if self._commit_effects(effects, index):
+            self._frame.SetStatusText(f"Efeito renomeado: {name}.")
+
+    def _on_replace(self, _event: wx.Event) -> None:
+        index = self.effect_list.GetSelection()
+        if index == wx.NOT_FOUND:
+            return
+        path = self._choose_file()
+        if path is not None:
+            effects = self._effects.copy()
+            effects[index] = replace(effects[index], path=path)
+            if self._commit_effects(effects, index):
+                self._frame.SetStatusText(f"Arquivo substituído: {effects[index].name}.")
+
+    def _on_remove(self, _event: wx.Event) -> None:
+        index = self.effect_list.GetSelection()
+        if index == wx.NOT_FOUND:
+            return
+        effects = self._effects.copy()
+        removed = effects.pop(index)
+        if self._commit_effects(effects, index):
+            self._frame.SetStatusText(f"Efeito removido do painel: {removed.name}. Arquivo original preservado.")
+
+    def play_index(self, index: int) -> None:
+        if not 0 <= index < len(self._effects):
+            self._frame.SetStatusText("Nenhum efeito configurado nessa posição. Use F6 para adicionar.")
+            return
+        self._frame.play_personal_sound(self._effects[index])
+
+    def _create_effect_menu(self) -> wx.Menu:
+        menu = wx.Menu()
+        for label, handler in (
+            ("&Tocar", self._on_play),
+            ("&Renomear...", self._on_rename),
+            ("&Substituir arquivo...", self._on_replace),
+            ("&Excluir do painel", self._on_remove),
+            ("&Parar todos os efeitos", self._on_stop),
+        ):
+            item = menu.Append(wx.ID_ANY, label)
+            menu.Bind(wx.EVT_MENU, handler, id=item.GetId())
+        return menu
+
+    def _show_effect_menu(self, _event: wx.Event = None, *, position=None) -> None:
+        if self.effect_list.GetSelection() == wx.NOT_FOUND:
+            return
+        menu = self._create_effect_menu()
+        try:
+            self.effect_list.PopupMenu(menu, position if position is not None else wx.Point(0, 0))
+        finally:
+            menu.Destroy()
+        (self.effect_list if self._effects else self.add_button).SetFocus()
+
+    def _on_context_menu(self, event: wx.ContextMenuEvent) -> None:
+        position = event.GetPosition()
+        if position == wx.DefaultPosition:
+            self._show_effect_menu()
+            return
+        position = self.effect_list.ScreenToClient(position)
+        selection = self.effect_list.HitTest(position)
+        if selection == wx.NOT_FOUND:
+            return
+        self.effect_list.SetSelection(selection)
+        self._show_effect_menu(position=position)
 
     def _on_play(self, _event: wx.Event) -> None:
         selection = self.effect_list.GetSelection()
         if selection != wx.NOT_FOUND:
-            self._frame.play_sound_effect(self._effects[selection].effect_id)
+            self.play_index(selection)
 
     def _on_stop(self, _event: wx.Event) -> None:
         self._frame.stop_sound_effects()
@@ -376,6 +561,11 @@ class SoundboardPanel(wx.ScrolledWindow):
         event.Skip()
 
     def _on_key_down(self, event: wx.KeyEvent) -> None:
+        if event.GetKeyCode() == wx.WXK_WINDOWS_MENU or (
+            event.GetKeyCode() == wx.WXK_F10 and event.ShiftDown()
+        ):
+            self._show_effect_menu()
+            return
         if event.GetKeyCode() in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER):
             self._on_play(event)
             return
@@ -383,6 +573,27 @@ class SoundboardPanel(wx.ScrolledWindow):
             self._on_stop(event)
             return
         event.Skip()
+
+
+class ReleaseNotesDialog(wx.Dialog):
+    """Native read-only text, immediately focused for screen-reader navigation."""
+
+    def __init__(self, parent: wx.Window, text: str) -> None:
+        super().__init__(parent, title=f"Novidades da Mini Mesa — {__version__}", size=(650, 550))
+        root = wx.BoxSizer(wx.VERTICAL)
+        self.news_text = wx.TextCtrl(
+            self, value=text, style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_RICH2,
+        )
+        self.news_text.SetName(f"Novidades da versão {__version__}")
+        self.news_text.SetInsertionPoint(0)
+        root.Add(self.news_text, 1, wx.ALL | wx.EXPAND, 12)
+        close_button = wx.Button(self, wx.ID_OK, "&Fechar novidades")
+        close_button.SetDefault()
+        self.SetEscapeId(wx.ID_OK)
+        root.Add(close_button, 0, wx.ALL | wx.ALIGN_RIGHT, 12)
+        self.SetSizer(root)
+        self.CentreOnParent()
+        self.news_text.SetFocus()
 
 
 class HelpDialog(wx.Dialog):
@@ -510,7 +721,7 @@ class MainFrame(wx.Frame):
         )
         self._tray_icon: SystemTrayIcon | None = None
         self._last_focused_control: wx.Window | None = None
-        self._tray_notification_shown = False
+        self._minimize_generation = 0
         self._update_check_in_progress = False
         self._update_progress_dialog: wx.ProgressDialog | None = None
         self._update_cancel_event: threading.Event | None = None
@@ -573,8 +784,8 @@ class MainFrame(wx.Frame):
 
         monitor_label = wx.StaticText(box_devices, label="Dispositivo de re&torno:")
         self.monitor_choice = wx.Choice(box_devices)
-        self.monitor_choice.SetName("Dispositivo para ouvir o retorno")
-        self.monitor_choice.Enable(self.preferences.monitor_enabled)
+        self.monitor_choice.SetName("Dispositivo para ouvir os efeitos e o retorno da voz")
+        self.monitor_choice.Enable()
         self.monitor_choice.Bind(wx.EVT_CHOICE, self._on_preference_changed)
         devices.Add(monitor_label, 0, wx.LEFT | wx.RIGHT, 8)
         devices.Add(self.monitor_choice, 0, wx.ALL | wx.EXPAND, 8)
@@ -991,7 +1202,7 @@ class MainFrame(wx.Frame):
         spatial_root.Add(spatial, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
 
         self.soundboard_panel = SoundboardPanel(self.notebook, self)
-        self.notebook.AddPage(self.soundboard_panel, "Sons e vinhetas")
+        self.notebook.AddPage(self.soundboard_panel, "Painel de efeitos")
         for page in pages:
             page.FitInside()
         root.Add(self.notebook, 1, wx.ALL | wx.EXPAND, 8)
@@ -1032,26 +1243,37 @@ class MainFrame(wx.Frame):
         self._stop_effects_id = wx.NewIdRef()
         effects_menu.Append(
             self._open_soundboard_id,
-            "&Abrir soundboard\tCtrl+Shift+E",
+            "&Abrir painel de efeitos\tCtrl+Shift+E",
         )
         effects_menu.AppendSeparator()
-        self._effect_menu_ids: dict[int, str] = {}
-        for number, effect in enumerate(self.engine.sound_effects(), start=1):
+        self._effect_menu_ids: dict[int, int] = {}
+        for number in range(1, 11):
             menu_id = wx.NewIdRef()
-            effects_menu.Append(menu_id, f"{effect.name}\tCtrl+{number}")
-            self._effect_menu_ids[int(menu_id)] = effect.effect_id
+            effects_menu.Append(menu_id, f"Reproduzir efeito {number} da página atual\tCtrl+{number % 10}")
+            self._effect_menu_ids[int(menu_id)] = number - 1
             self.Bind(
                 wx.EVT_MENU,
-                lambda _event, effect_id=effect.effect_id: self.play_sound_effect(
-                    effect_id
-                ),
+                lambda _event, index=number - 1: self.soundboard_panel.play_index(index),
                 id=menu_id,
             )
         effects_menu.AppendSeparator()
-        effects_menu.Append(self._stop_effects_id, "&Parar todos\tCtrl+0")
+        effects_menu.Append(self._stop_effects_id, "&Parar todos\tCtrl+Shift+0")
+        pages_menu = wx.Menu()
+        self._page_menu_ids: dict[int, int] = {}
+        for page in range(10):
+            menu_id = wx.NewIdRef()
+            self._page_menu_ids[int(menu_id)] = page
+            pages_menu.Append(menu_id, f"Página {page + 1}\tAlt+{(page + 1) % 10}")
+            self.Bind(wx.EVT_MENU,
+                      lambda _event, page=page: self.soundboard_panel.select_page(page),
+                      id=menu_id)
+        effects_menu.AppendSubMenu(pages_menu, "Páginas de efeitos")
         menu_bar.Append(effects_menu, "E&feitos")
 
         help_menu = wx.Menu()
+        self._news_id = wx.NewIdRef()
+        help_menu.Append(self._news_id, "&Novidades desta versão")
+        self.Bind(wx.EVT_MENU, self._on_release_notes, id=self._news_id)
         self._project_help_id = wx.NewIdRef()
         self._check_updates_id = wx.NewIdRef()
         help_menu.Append(self._project_help_id, "&Ajuda do projeto\tF1")
@@ -1072,18 +1294,22 @@ class MainFrame(wx.Frame):
             (wx.ACCEL_NORMAL, wx.WXK_F4, self._id_f4),
             (wx.ACCEL_NORMAL, wx.WXK_F6, self._id_f6),
             (wx.ACCEL_CTRL | wx.ACCEL_SHIFT, ord("E"), self._open_soundboard_id),
-            (wx.ACCEL_CTRL, ord("0"), self._stop_effects_id),
+            (wx.ACCEL_CTRL | wx.ACCEL_SHIFT, ord("0"), self._stop_effects_id),
         ]
         accelerators.extend(
-            (wx.ACCEL_CTRL, ord(str(number)), menu_id)
+            (wx.ACCEL_CTRL, ord(str(number % 10)), menu_id)
             for number, menu_id in enumerate(self._effect_menu_ids, start=1)
+        )
+        accelerators.extend(
+            (wx.ACCEL_ALT, ord(str((page + 1) % 10)), menu_id)
+            for menu_id, page in self._page_menu_ids.items()
         )
         accelerator = wx.AcceleratorTable(accelerators)
         self.SetAcceleratorTable(accelerator)
         self.Bind(wx.EVT_MENU, self._on_refresh, id=wx.ID_REFRESH)
-        self.Bind(wx.EVT_MENU, lambda _e: self.play_sound_effect("machine_gun"), id=self._id_f2)
-        self.Bind(wx.EVT_MENU, lambda _e: self.play_sound_effect("applause"), id=self._id_f3)
-        self.Bind(wx.EVT_MENU, lambda _e: self.play_sound_effect("dj_horn"), id=self._id_f4)
+        self.Bind(wx.EVT_MENU, lambda _e: self.soundboard_panel.play_index(0), id=self._id_f2)
+        self.Bind(wx.EVT_MENU, lambda _e: self.soundboard_panel.play_index(1), id=self._id_f3)
+        self.Bind(wx.EVT_MENU, lambda _e: self.soundboard_panel.play_index(2), id=self._id_f4)
         self.Bind(wx.EVT_MENU, self._on_browse_soundboard_file, id=self._id_f6)
         self.Bind(
             wx.EVT_MENU,
@@ -1105,9 +1331,9 @@ class MainFrame(wx.Frame):
         self._refresh_devices()
         self.Centre()
         self.input_choice.SetFocus()
-        if not self.preferences.welcome_shown:
-            wx.CallAfter(self._show_welcome)
-        if can_self_update():
+        if not self.preferences.welcome_shown or self.preferences.last_seen_news_version != __version__:
+            wx.CallAfter(self._show_startup_information)
+        elif can_self_update():
             wx.CallLater(3000, self._start_update_check, False)
 
     def _focus_control(self, control: wx.Window) -> None:
@@ -1171,15 +1397,7 @@ class MainFrame(wx.Frame):
             dialog.Destroy()
 
     def _on_open_soundboard(self, _event: wx.Event) -> None:
-        self._focus_control(self.soundboard_panel.effect_list)
-
-    def play_sound_effect(self, effect_id: str) -> None:
-        try:
-            effect = self.engine.play_sound_effect(effect_id)
-        except Exception as exc:
-            self._show_error(str(exc))
-            return
-        self.SetStatusText(f"Efeito reproduzido: {effect.name}.")
+        self._focus_control(self.soundboard_panel.page_choice)
 
     def stop_sound_effects(self) -> None:
         self.engine.stop_sound_effects()
@@ -1362,6 +1580,35 @@ class MainFrame(wx.Frame):
         self.SetStatusText("Atualização baixada; instalando a nova versão...")
         self.Close()
 
+    def _show_startup_information(self) -> None:
+        if self.IsBeingDeleted():
+            return
+        if not self.preferences.welcome_shown:
+            self._show_welcome()
+        if not self.IsBeingDeleted() and self.preferences.last_seen_news_version != __version__:
+            self._on_release_notes(None)
+        if not self.IsBeingDeleted() and can_self_update():
+            wx.CallLater(3000, self._start_update_check, False)
+
+    def _on_release_notes(self, _event: wx.Event) -> None:
+        try:
+            text = load_release_notes()
+        except (OSError, UnicodeError) as exc:
+            self._show_error(f"Não foi possível abrir as novidades desta versão.\n\n{exc}")
+            return
+        dialog = ReleaseNotesDialog(self, text)
+        try:
+            dialog.ShowModal()
+        finally:
+            dialog.Destroy()
+        preferences = replace(self._current_preferences(), last_seen_news_version=__version__)
+        try:
+            self.preferences_store.save(preferences)
+        except OSError as exc:
+            self.SetStatusText(f"Não foi possível registrar a leitura das novidades: {exc}")
+            return
+        self.preferences = preferences
+
     def _show_welcome(self) -> None:
         if self.IsBeingDeleted() or self.preferences.welcome_shown:
             return
@@ -1521,6 +1768,7 @@ class MainFrame(wx.Frame):
         preset = _STYLE_PRESETS[self.creative_choice.GetSelection()][0]
         return AppPreferences(
             welcome_shown=self.preferences.welcome_shown,
+            last_seen_news_version=self.preferences.last_seen_news_version,
             input_device=self.input_choice.GetStringSelection(),
             output_device=self.output_choice.GetStringSelection(),
             monitor_enabled=self.monitor_checkbox.GetValue(),
@@ -1556,6 +1804,8 @@ class MainFrame(wx.Frame):
             expander_enabled=self.expander_checkbox.GetValue(),
             auto_gain_enabled=self.auto_gain_checkbox.GetValue(),
             plosive_filter_enabled=self.plosive_checkbox.GetValue(),
+            personal_sounds=tuple(self.soundboard_panel._all_effects),
+            selected_sound_page=self.soundboard_panel._page,
             soundboard_volume_percent=self._soundboard_settings.volume_percent,
             soundboard_ducking_enabled=self._soundboard_settings.ducking_enabled,
             soundboard_ducking_percent=self._soundboard_settings.ducking_percent,
@@ -1614,9 +1864,10 @@ class MainFrame(wx.Frame):
 
     def _on_preference_changed(self, event: wx.Event) -> None:
         previous_monitor = self._saved_monitor_output()
+        previous_effects_output = self.preferences.monitor_device
         self._save_preferences()
         if event.GetEventObject() is self.monitor_choice and self.engine.is_running:
-            self._update_running_monitor(previous_monitor)
+            self._update_running_monitor(previous_monitor, previous_effects_output)
         event.Skip()
 
     def _on_voice_changed(self, event: wx.Event) -> None:
@@ -1726,58 +1977,62 @@ class MainFrame(wx.Frame):
                 f"{settings.volume_percent} por cento."
             )
 
-    def _on_browse_soundboard_file(self, _event: wx.Event) -> None:
-        with wx.FileDialog(
-            self,
-            "Escolha um arquivo de áudio para a vinheta",
-            wildcard="Arquivos de áudio (*.wav;*.mp3;*.flac;*.ogg)|*.wav;*.mp3;*.flac;*.ogg",
-            style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST,
-        ) as dialog:
-            if dialog.ShowModal() == wx.ID_OK:
-                path = dialog.GetPath()
-                self.SetStatusText("Carregando a vinheta personalizada...")
-                threading.Thread(
-                    target=self._custom_sound_worker,
-                    args=(path,),
-                    name="mini-mesa-soundboard-load",
-                    daemon=True,
-                ).start()
+    def _on_browse_soundboard_file(self, event: wx.Event) -> None:
+        self._focus_control(self.soundboard_panel.add_button)
+        self.soundboard_panel._on_add(event)
 
-    def _custom_sound_worker(self, path: str) -> None:
+    def play_personal_sound(self, sound: PersonalSound) -> None:
+        if not self.engine.is_running:
+            self._show_error("Ative a mesa antes de reproduzir os efeitos.")
+            return
+        self.SetStatusText(f"Carregando efeito: {sound.name}.")
+        threading.Thread(
+            target=self._custom_sound_worker,
+            args=(sound,),
+            name="mini-mesa-soundboard-load",
+            daemon=True,
+        ).start()
+
+    def _custom_sound_worker(self, sound: PersonalSound) -> None:
         try:
-            played = self.engine.play_sound(path)
+            played = self.engine.play_sound(sound.path)
         except Exception:
             played = False
-        wx.CallAfter(self._finish_custom_sound, played)
+        wx.CallAfter(self._finish_custom_sound, sound, played)
 
-    def _finish_custom_sound(self, played: bool) -> None:
+    def _finish_custom_sound(self, sound: PersonalSound, played: bool) -> None:
         if self.IsBeingDeleted():
             return
-        self.SetStatusText(
-            "Vinheta personalizada carregada e reproduzindo."
-            if played
-            else "Não foi possível reproduzir a vinheta personalizada."
-        )
+        if played:
+            self.SetStatusText(f"Reproduzindo efeito: {sound.name}.")
+        else:
+            self._show_error(
+                f"Não foi possível reproduzir '{sound.name}'. "
+                "Verifique se a mesa está ativa e se o arquivo ainda existe e é válido. "
+                "Use Substituir arquivo para escolher outro áudio.\n\n"
+                f"Arquivo: {sound.path}"
+            )
 
     def _on_monitor_toggled(self, _event: wx.Event) -> None:
         previous_monitor = self._saved_monitor_output()
+        previous_effects_output = self.preferences.monitor_device
         enabled = self.monitor_checkbox.GetValue()
-        self.monitor_choice.Enable(enabled)
+        self.monitor_choice.Enable()
         self._save_preferences()
         if self.engine.is_running:
-            self._update_running_monitor(previous_monitor)
+            self._update_running_monitor(previous_monitor, previous_effects_output)
             return
         self.SetStatusText(
             "Retorno experimental ativado; a saída virtual permanece isolada."
             if enabled
-            else "Retorno desativado."
+            else "Retorno da voz desativado. Os efeitos continuam audíveis no dispositivo de retorno."
         )
 
     def _set_routing_controls_enabled(self, enabled: bool) -> None:
         self.input_choice.Enable(enabled)
         self.output_choice.Enable(enabled)
         self.monitor_checkbox.Enable()
-        self.monitor_choice.Enable(self.monitor_checkbox.GetValue())
+        self.monitor_choice.Enable()
         self.refresh_button.Enable(enabled)
         self.noise_reduction_checkbox.Enable()
 
@@ -1808,6 +2063,7 @@ class MainFrame(wx.Frame):
             self.input_choice.GetStringSelection(),
             self.output_choice.GetStringSelection(),
             self._selected_monitor_output(),
+            effects_output=self.monitor_choice.GetStringSelection() or None,
         )
 
     def _show_running_state(self) -> None:
@@ -1864,15 +2120,18 @@ class MainFrame(wx.Frame):
             else "Mesa ativa sem efeitos."
         )
 
-    def _update_running_monitor(self, previous_monitor: str | None) -> None:
+    def _update_running_monitor(self, previous_monitor: str | None, previous_effects_output: str = "") -> None:
         self.SetStatusText("Atualizando a rota de retorno experimental...")
         try:
-            self.engine.update_monitor(self._selected_monitor_output())
+            self.engine.update_monitor(
+                self._selected_monitor_output(),
+                effects_output=self.monitor_choice.GetStringSelection() or None,
+            )
         except Exception as exc:
             self.monitor_checkbox.SetValue(previous_monitor is not None)
-            if previous_monitor is not None:
-                self.monitor_choice.SetStringSelection(previous_monitor)
-            self.monitor_choice.Enable(previous_monitor is not None)
+            if previous_monitor or previous_effects_output:
+                self.monitor_choice.SetStringSelection(previous_monitor or previous_effects_output)
+            self.monitor_choice.Enable()
             self._save_preferences()
             self._set_routing_controls_enabled(False)
             self._show_running_state()
@@ -2019,36 +2278,46 @@ class MainFrame(wx.Frame):
         self.Close()
 
     def _on_iconize(self, event: wx.IconizeEvent) -> None:
-        if (
-            event.IsIconized()
-            and self._tray_icon is not None
-            and self._tray_icon.is_available
-        ):
-            wx.CallAfter(self._hide_to_tray)
+        self._minimize_generation += 1
+        if event.IsIconized():
+            focused = wx.Window.FindFocus()
+            if focused is not None and self.IsDescendant(focused):
+                self._last_focused_control = focused
+            if self._tray_icon is not None and self._tray_icon.is_available:
+                wx.CallAfter(self._hide_to_tray, self._minimize_generation)
         event.Skip()
 
-    def _hide_to_tray(self) -> None:
-        if self.IsBeingDeleted() or not self.IsShown():
+    def _hide_to_tray(self, generation: int) -> None:
+        # An older minimize callback must never hide a newly restored window.
+        if (
+            self.IsBeingDeleted()
+            or generation != self._minimize_generation
+            or not self.IsIconized()
+            or not self.IsShown()
+            or self._tray_icon is None
+            or not self._tray_icon.is_available
+        ):
             return
-        focused = wx.Window.FindFocus()
-        if focused is not None and self.IsDescendant(focused):
-            self._last_focused_control = focused
         self.Hide()
-        if self._tray_icon is not None and not self._tray_notification_shown:
-            self._tray_icon.notify_minimized(self.engine.is_running)
-            self._tray_notification_shown = True
+        self._tray_icon.notify_minimized()
 
     def restore_from_tray(self) -> None:
         if self.IsBeingDeleted():
             return
+        self._minimize_generation += 1
         self.Show()
         self.Iconize(False)
         self.Raise()
+        wx.CallAfter(self._restore_focus)
+
+    def _restore_focus(self) -> None:
+        if self.IsBeingDeleted() or self.IsIconized() or not self.IsShown():
+            return
         focused = self._last_focused_control
         if focused is not None and not focused.IsBeingDeleted():
-            wx.CallAfter(focused.SetFocus)
+            focused.SetFocus()
         else:
-            wx.CallAfter(self.input_choice.SetFocus)
+            self.input_choice.SetFocus()
 
     def exit_from_tray(self) -> None:
         if not self.IsBeingDeleted():
@@ -2060,7 +2329,7 @@ class MainFrame(wx.Frame):
     def _handle_audio_error(self, message: str) -> None:
         if self.IsBeingDeleted():
             return
-        if not self.IsShown():
+        if not self.IsShown() or self.IsIconized():
             self.restore_from_tray()
         self._set_routing_controls_enabled(True)
         self.toggle_button.SetLabel("&Ativar mesa")

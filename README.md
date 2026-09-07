@@ -9,6 +9,13 @@ um cabo de áudio virtual usado pelo Discord, TeamTalk, WhatsApp ou outro progra
 > o instalador Windows já são utilizáveis, mas a versão ainda precisa de testes
 > em diferentes computadores e interfaces de áudio.
 
+## Versão em testes
+
+A branch `main` contém a versão **1.1.0 em testes**, com painel de efeitos pessoais,
+retorno independente dos sons e janela de novidades. A release pública anterior
+continua disponível abaixo. Para testar estas mudanças antes da release, use as
+instruções de desenvolvimento ou gere o instalador a partir desta branch.
+
 ## Instalação rápida
 
 Baixe `MiniMesaDeSom-Setup-1.0.0.exe` na página da
@@ -39,14 +46,13 @@ entradas reconhecidas pelo Windows podem ser selecionadas diretamente.
   bypass real em 0%.
 - Compressor, equalizador, noise gate, de-esser, expander, ganho automático e
   filtro de plosivas.
-- Soundboard com cinco efeitos pessoais, arquivo personalizado, volume e
+- Painel de efeitos pessoais com lista livre, nomes editáveis, volume e
   ducking durante a fala.
 - Redução neural de ruído RNNoise, opcional e executada localmente.
 - Áudio espacial binaural 3D por coordenadas X, Y e Z, com movimento automático.
-- Soundboard acessível com tiro, palmas, fala e buzina misturados na rota virtual.
 - Reverb e redução de ruído utilizáveis separadamente ou em conjunto.
 - Retorno local experimental, mantido aberto para testes e contribuições.
-- Minimização para a bandeja do sistema sem interromper o áudio.
+- Minimização para a bandeja, com notificação explicativa, sem interromper o áudio.
 - Preferências persistentes em JSON com recuperação de configuração inválida.
 - Verificação automática de novas versões pelo GitHub, com download acessível e
   validação SHA-256 antes da instalação.
@@ -72,10 +78,17 @@ Microfone físico
 ```
 
 Os efeitos do soundboard entram na mesma rota antes do limitador. Eles chegam ao
-aplicativo de conversa e ao retorno sem abrir outro dispositivo de áudio.
+aplicativo de conversa pela saída virtual. Os efeitos também são ouvidos no
+dispositivo de retorno escolhido, mesmo com **Ouvir retorno** desligado.
 
-Quando **Ouvir retorno** está ligado, uma cópia do áudio processado também
-segue para o fone escolhido. Use fones de ouvido para evitar microfonia. Esse
+A escuta local dos efeitos funciona automaticamente com a mesa ativa. Deixe
+**Ouvir retorno** desligado para gravar voz e efeitos ouvindo somente os efeitos
+no fone. O seletor **Dispositivo de retorno** permanece disponível para escolher
+onde ouvi-los. Nessa escuta separada, os sons respeitam volume e ducking do painel,
+sem os efeitos de processamento da voz, como reverb e áudio 3D.
+
+Quando **Ouvir retorno** está ligado, uma única cópia do áudio processado completo
+segue para o fone escolhido, sem duplicar os sons. Use fones de ouvido para evitar microfonia. Esse
 retorno ainda é experimental e pode apresentar estalos em algumas combinações
 de dispositivos; a rota do cabo virtual permanece isolada para que isso não
 interrompa gravações e chamadas.
@@ -140,11 +153,34 @@ Depois execute:
 .\tools\build_installer.ps1
 ```
 
-O script roda os testes, empacota o programa com PyInstaller, baixa os pacotes
+O script roda os testes, empacota o programa com PyInstaller, executa um autoteste
+do executável sem o Python de desenvolvimento no PATH e baixa os pacotes
 oficiais do VB-CABLE e AudioDeviceCmdlets com verificação SHA-256 e gera
 `installer-output\MiniMesaDeSom-Setup-1.0.0.exe`. O aplicativo é empacotado em
 uma pasta interna para dar mais estabilidade às bibliotecas nativas de áudio;
 para o usuário, a entrega continua sendo um único instalador.
+
+### Verificação do pacote
+
+A geração do instalador é interrompida se o executável não conseguir carregar a
+interface, a ajuda, o Pedalboard, o RNNoise, os dados HRTF ou os codecs WAV, MP3,
+FLAC e OGG. Esse autoteste é obrigatório mesmo com `-SkipTests` e grava seu
+resultado em `build/frozen-self-test.json`, incluindo os dispositivos e APIs de
+áudio encontrados, sem abrir microfones para captura.
+
+O relatório ajuda a comparar a versão instalada com a de desenvolvimento; ele
+não substitui uma instalação em máquina limpa nem testes com o hardware do usuário.
+
+## Novidades da versão
+
+Na primeira abertura após atualizar, uma janela nativa acessível apresenta as
+novidades da versão. Use as setas para ler, Ctrl+Home para voltar ao início e
+Escape ou o botão Fechar novidades para fechar. A leitura é registrada nas
+preferências para que a janela não apareça em todas as aberturas.
+
+O menu **Ajuda > Novidades desta versão** permite reler o texto. Os arquivos
+ficam em `mini_mesa/assets/novidades`, com o número da versão no nome, e são
+incluídos no pacote e verificados pelo autoteste do executável.
 
 ## Atualizações
 
@@ -177,7 +213,7 @@ A janela reúne os controles em cinco guias:
 - **Voz e efeitos**: modificador de voz, reverb, estilos, modulações, ambientes e eco.
 - **Limpeza da voz**: compressor, equalizador, filtros e redução de ruído.
 - **Áudio 3D**: posição e movimento espacial.
-- **Sons e vinhetas**: reprodução de sons, arquivo personalizado, volume e ducking.
+- **Painel de efeitos**: adicionar, renomear, substituir, remover e reproduzir arquivos pessoais, com volume e ducking.
 
 Use `Ctrl+Tab` para avançar e `Ctrl+Shift+Tab` para voltar entre as guias.
 O foco fica no seletor de guias; `Tab` entra nos controles da guia selecionada.
@@ -193,15 +229,20 @@ revelam automaticamente a guia correspondente.
 
 ## Bandeja do sistema
 
-Ao minimizar a janela normalmente ou pressionar `Windows+M`, a Mini Mesa some da
-barra de tarefas e continua funcionando na bandeja do sistema. Para restaurar
-pelo teclado, pressione `Windows+B`, localize **Mini Mesa de Som** com as setas e
-pressione `Enter`. O menu do ícone também oferece **Abrir Mini Mesa de Som** e
-**Encerrar programa**.
+Ao minimizar a janela ou pressionar `Windows+M`, a Mini Mesa fica oculta, sai da
+barra de tarefas e de `Alt+Tab`, mantendo o áudio ativo. A cada minimização para a
+bandeja, solicita ao Windows a notificação **Mini Mesa minimizada**: “A Mini Mesa
+está minimizada. Você pode restaurá-la pela bandeja do sistema.” A exibição e o anúncio da
+notificação dependem das configurações de notificações do Windows e do leitor de tela.
 
-Se o Windows não conseguir criar o ícone, a janela permanece apenas minimizada
-na barra de tarefas para nunca deixar o programa inacessível. Uma falha de áudio
-restaura a janela automaticamente antes de mostrar a mensagem de erro.
+Para voltar, pressione `Windows+B`, localize **Mini Mesa de Som**, abra o menu
+com a tecla Aplicações ou `Shift+F10` e escolha **Abrir Mini Mesa de Som**.
+Depois de restaurada pela bandeja, a janela volta à barra de tarefas e a
+`Alt+Tab`. O menu também oferece **Encerrar programa**.
+
+Se o ícone da bandeja não estiver disponível, a janela permanece minimizada na
+barra de tarefas para continuar acessível. Uma falha de áudio restaura a janela
+antes de mostrar a mensagem de erro.
 
 ## Efeitos
 
@@ -242,25 +283,60 @@ ouvinte. Aplicativos de conversa que transformem o microfone em mono eliminarão
 boa parte ou todo o efeito. Faça uma gravação estéreo no aplicativo de destino
 para avaliá-lo ou use o retorno experimental.
 
-### Soundboard acessível
+### Painel de efeitos pessoais
 
-O menu **Efeitos > Abrir soundboard** ou `Ctrl+Shift+E` seleciona a guia
-**Sons e vinhetas** e leva o foco à lista de sons. Na lista, use as setas para
-escolher um som, `Enter` para reproduzir e `Espaço` para parar todos.
-Os atalhos diretos funcionam em qualquer guia, desde que a Mini Mesa esteja
-em foco e ativa.
+O painel começa vazio: nenhum efeito sonoro é predefinido ou distribuído no
+instalador. O menu **Efeitos > Abrir painel de efeitos** ou `Ctrl+Shift+E`
+seleciona a guia **Painel de efeitos** e leva o foco ao seletor de páginas.
+
+1. Abra o painel com `Ctrl+Shift+E`. No seletor, use as setas para escolher
+   **Página 1**, **Página 2** e assim por diante. O foco permanece no seletor
+   enquanto você escolhe.
+2. Pressione `Tab` para chegar ao botão **Adicionar efeitos, página 1** (o número
+   acompanha a página escolhida). Ative o botão e selecione um arquivo WAV, MP3,
+   FLAC ou OGG. `F6` também adiciona diretamente à página atual, mesmo com a mesa
+   desativada, sem iniciar a reprodução.
+3. Após adicionar, o foco vai para o novo efeito. A lista anuncia somente o nome
+   e o atalho do som, sem ler o caminho inteiro do arquivo.
+4. Na lista, use as setas para escolher o efeito e abra seu menu com a tecla
+   **Aplicações** ou `Shift+F10`. O botão direito sobre um efeito e o botão
+   **Ações do efeito** oferecem o mesmo menu: **Tocar**, **Renomear**,
+   **Substituir arquivo**, **Excluir do painel** e **Parar todos os efeitos**.
+   Excluir do painel preserva o arquivo original no computador.
+5. Com a mesa ativa, `Enter` reproduz o efeito selecionado. `Espaço` na lista
+   ou `Ctrl+Shift+0` interrompe todos os sons.
+
+O painel tem dez páginas, com até dez efeitos em cada uma: até cem sons.
+Use o seletor **Página de efeitos** ou `Alt+1` a `Alt+9`; `Alt+0` escolhe a página
+10. A página escolhida é salva e anunciada no nome acessível da lista.
+
+`Ctrl+1` a `Ctrl+9` reproduzem as posições 1 a 9 da página atual; `Ctrl+0` reproduz
+o décimo efeito. Esses atalhos funcionam também em outras guias, com a janela em
+foco. `F2`, `F3` e `F4` reproduzem as posições 1, 2 e 3 da página atual.
+Trocar de página não interrompe sons em reprodução. **Parar todos**, `Ctrl+Shift+0`
+ou `Espaço` na lista interrompem os sons de todas as páginas.
+
+`F6` adiciona à página selecionada. Quando ela estiver cheia, escolha outra página
+ou remova um efeito. Ao remover, os atalhos acompanham a nova ordem dessa página.
+Uma lista salva pela versão anterior do painel é distribuída em grupos de dez.
+Se uma lista antiga ultrapassar cem itens, os excedentes são preservados no final
+da página 10, acessíveis pela lista, sem atalhos numéricos adicionais.
+
+Nomes, caminhos e ordem são salvos nas preferências. Os áudios permanecem no
+local escolhido, sem cópia para o aplicativo. Se um arquivo for movido ou apagado,
+use **Substituir arquivo** para localizar o áudio novamente. Os arquivos podem ter
+até 256 MB e dez minutos de duração. Arquivos vazios ou não reconhecidos são
+recusados ao cadastrar.
 
 Os efeitos podem tocar simultaneamente e entram na mesma cadeia da voz. Portanto,
-reverb e áudio espacial 3D ativos também processam todos os sons do soundboard.
+reverb e áudio espacial 3D ativos também processam os sons do painel. O volume e
+a redução dos efeitos durante a fala continuam disponíveis.
 
-O pacote pessoal instalado neste computador oferece um tiro de pistola, uma
-rajada de metralhadora, palmas, uma air horn de DJ com quatro segundos e a frase
-"Sensacional!" de Mano Brown. Esses arquivos ficam em
-`%APPDATA%\Mini Mesa de Som\sounds`, fora do Git e disponíveis sem internet.
-As palmas vêm do Mixkit, o tiro e a air horn vêm do Orange Free Sounds e a voz
-foi obtida no Myinstants. O pacote é usado apenas para diversão pessoal e não é
-distribuído junto com o programa. A procedência completa fica registrada em
-`tools/PERSONAL_SOUND_PACK_NOTICE.txt`.
+Ao atualizar uma versão antiga, a lista também começa vazia e as demais
+preferências são preservadas. Os arquivos pessoais antigos continuam em
+`%APPDATA%\Mini Mesa de Som\sounds` ou
+`%APPDATA%\Mini Mesa de Som Teste\sounds`; use **Adicionar efeito de áudio** para
+escolher quais deles deseja incluir no painel.
 
 ## Atalhos
 
@@ -277,19 +353,17 @@ distribuído junto com o programa. A procedência completa fica registrada em
 - `Alt+X`, `Alt+Y` e `Alt+Z`: ajustar as coordenadas espaciais.
 - `Alt+U`: ativar ou desativar o movimento automático.
 - `Alt+V`: ajustar a velocidade do movimento espacial.
-- `Ctrl+Shift+E`: acessar a guia Sons e vinhetas e focar a lista de sons.
-- `Ctrl+1`: reproduzir pistola.
-- `Ctrl+2`: reproduzir metralhadora.
-- `Ctrl+3`: reproduzir palmas.
-- `Ctrl+4`: reproduzir buzina de DJ por até quatro segundos.
-- `Ctrl+5`: reproduzir "Sensacional!" de Mano Brown.
-- `Ctrl+0`: interromper todos os efeitos.
+- `Ctrl+Shift+E`: acessar o Painel de efeitos e escolher a página.
+- `Aplicações` ou `Shift+F10` na lista: abrir as ações do efeito selecionado.
+- `Alt+1` a `Alt+9` e `Alt+0`: selecionar as páginas 1 a 10.
+- `Ctrl+1` a `Ctrl+9` e `Ctrl+0`: reproduzir os efeitos 1 a 10 da página atual.
+- `Ctrl+Shift+0`: interromper todos os efeitos de todas as páginas.
 - `Alt+A`: ativar ou desativar a mesa.
 - `Alt+C`: encerrar o programa.
 - `F5`: atualizar os dispositivos.
 - `F1`: abrir a ajuda acessível com apresentação, atalhos e créditos.
-- `F2`: reproduzir metralhadora; `F3`: palmas; `F4`: buzina de DJ.
-- `F6`: escolher uma vinheta de áudio personalizada.
+- `F2`, `F3` e `F4`: reproduzir os efeitos nas posições 1, 2 e 3.
+- `F6`: adicionar um arquivo ao Painel de efeitos.
 - `Alt+J`, depois `A`: abrir Ajuda e verificar atualizações.
 
 Na ajuda aberta por `F1`, leitores de tela podem usar `H` e `Shift+H` para
@@ -305,7 +379,7 @@ As preferências são gravadas automaticamente em:
 %APPDATA%\Mini Mesa de Som\preferences.json
 ```
 
-O arquivo inclui os dispositivos, o retorno e os estados dos efeitos. A gravação usa um
+O arquivo inclui os dispositivos, o retorno, os estados dos efeitos e a lista de áudios pessoais. A gravação usa um
 arquivo temporário antes da substituição, reduzindo o risco de corrupção. Se o
 JSON estiver inválido ou um dispositivo desaparecer, a mesa usa valores seguros
 e seleciona uma alternativa disponível.
@@ -336,8 +410,9 @@ python -m pytest
 ```
 
 A suíte valida configurações, preferências, ciclo do motor, continuidade dos
-buffers, isolamento entre retorno e gravação e integração do redutor de ruído sem acessar os
-microfones físicos.
+buffers, isolamento entre retorno e gravação, integração do redutor de ruído e
+operação do painel de efeitos em controles wxPython reais. Os testes usam arquivos
+de áudio temporários, sem acessar microfones físicos nem alterar preferências pessoais.
 
 ## Arquitetura
 

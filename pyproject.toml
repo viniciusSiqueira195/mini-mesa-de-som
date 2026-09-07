@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mini-mesa-de-som"
-version = "1.0.0"
+version = "1.1.0"
 description = "Mesa de som virtual acessível com efeitos de voz em tempo real."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -31,8 +31,10 @@ include = ["mini_mesa*"]
 
 [tool.setuptools.package-data]
 mini_mesa = [
+    "assets/novidades/*.txt",
     "assets/hrtf/mit_kemar/*.wav",
     "assets/hrtf/mit_kemar/NOTICE.txt",
-    "assets/sounds/*.wav",
-    "assets/sounds/NOTICE.txt",
 ]
+
+[tool.setuptools.exclude-package-data]
+mini_mesa = ["assets/sounds/*"]

@@ -220,13 +220,23 @@ def _read_wave(path: Path) -> tuple[np.ndarray, float]:
     return audio, sample_rate
 
 
-def _read_custom_audio(path: Path) -> tuple[np.ndarray, float]:
+def validate_custom_audio(path: Path) -> None:
+    """Check a local file before adding it, without loading samples into memory."""
     if not path.is_file() or path.stat().st_size > _MAX_CUSTOM_FILE_BYTES:
-        raise SoundEffectError("Arquivo de som personalizado inválido ou muito grande.")
+        raise SoundEffectError("Arquivo inexistente ou maior que 256 MB. Escolha outro arquivo.")
     try:
         info = sf.info(str(path))
+        if info.frames <= 0 or info.channels <= 0:
+            raise SoundEffectError("O arquivo de áudio está vazio.")
         if info.samplerate <= 0 or info.frames / info.samplerate > _MAX_CUSTOM_SOUND_SECONDS:
             raise SoundEffectError("O som personalizado ultrapassa dez minutos.")
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise SoundEffectError("Não foi possível carregar o som personalizado.") from exc
+
+
+def _read_custom_audio(path: Path) -> tuple[np.ndarray, float]:
+    validate_custom_audio(path)
+    try:
         audio, source_rate = sf.read(str(path), dtype="float32", always_2d=True)
     except (OSError, RuntimeError, ValueError) as exc:
         raise SoundEffectError("Não foi possível carregar o som personalizado.") from exc

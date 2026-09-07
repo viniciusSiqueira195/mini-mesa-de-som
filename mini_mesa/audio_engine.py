@@ -710,6 +710,8 @@ class _RealtimeTransform:
 
 
 class AudioStream(Protocol):
+    def set_monitor_voice(self, enabled: bool) -> None: ...
+
     def run(self) -> None: ...
 
     def close(self) -> None: ...
@@ -728,6 +730,8 @@ class AudioBackend(Protocol):
         output_device: str,
         settings: ReverbSettings,
         monitor_output: str | None = None,
+        *,
+        monitor_voice: bool = True,
     ) -> AudioStream: ...
 
     def update_reverb(self, settings: ReverbSettings) -> None: ...
@@ -851,13 +855,11 @@ class PedalboardBackend:
             if "virtual" not in label.casefold()
             and any(api in _MONITOR_API_RANKS for _device_id, api in candidates)
         ]
-        wasapi_outputs = [
-            label
-            for label, candidates in physical_outputs
-            if any(api == "Windows WASAPI" for _device_id, api in candidates)
-        ]
-        if wasapi_outputs:
-            return tuple(wasapi_outputs)
+        # Prefer WASAPI without hiding devices exposed only by other APIs.
+        physical_outputs.sort(key=lambda item: (
+            min(_MONITOR_API_RANKS[api] for _, api in item[1] if api in _MONITOR_API_RANKS),
+            item[0].casefold(),
+        ))
         return tuple(label for label, _candidates in physical_outputs)
 
     def _refresh_devices(self) -> None:
@@ -908,6 +910,8 @@ class PedalboardBackend:
         output_device: str,
         settings: ReverbSettings,
         monitor_output: str | None = None,
+        *,
+        monitor_voice: bool = True,
     ) -> AudioStream:
         try:
             (
@@ -976,6 +980,8 @@ class PedalboardBackend:
                             input_channels=input_channels,
                             block_size=block_size,
                             processor=self._process_audio,
+                            effects_processor=lambda: self._effects_monitor_audio,
+                            monitor_voice=monitor_voice,
                         )
                         # Construction alone does not prove that a Windows host
                         # API can start the endpoint. Validate every route so an
@@ -1103,6 +1109,7 @@ class PedalboardBackend:
 
     def _process_audio(self, indata, frames: int):
         output = self._np.zeros((frames, 2), dtype=self._np.float32)
+        self._effects_monitor_audio = output
         with self._processing_lock:
             if self._effects is None:
                 return output
@@ -1125,6 +1132,8 @@ class PedalboardBackend:
                         soundboard_duck -= (
                             soundboard_settings.ducking_percent / 100.0
                         ) * activity
+            if soundboard_audio is not None:
+                self._effects_monitor_audio = soundboard_audio * soundboard_duck
             if self._noise_reducer is not None:
                 mono_input = self._noise_reducer.process(mono_input)
             pitch_shifter = getattr(self, "_pitch_shifter", None)
@@ -1834,9 +1843,13 @@ class _MultiOutputSoundDeviceStream:
         input_channels: int,
         block_size: int,
         processor: Callable,
+        effects_processor: Callable | None = None,
+        monitor_voice: bool = True,
     ) -> None:
         self._sd = sounddevice
         self._processor = processor
+        self._effects_processor = effects_processor
+        self._monitor_voice = monitor_voice
         self._sample_rate = sample_rate
         self._block_size = block_size
         self._stop_event = threading.Event()
@@ -1955,15 +1968,24 @@ class _MultiOutputSoundDeviceStream:
         # but can never hold up the input callback or the primary output.
         self._primary_output.push(processed)
         with self._outputs_lock:
-            monitor = self._monitor_output
-            pending_monitor = self._pending_monitor
-        if monitor is not None:
-            monitor.push(processed)
-        if pending_monitor is not None:
-            pending_monitor.push(processed)
+            monitor_audio = processed
+            if not self._monitor_voice and self._effects_processor is not None:
+                monitor_audio = self._effects_processor()
+            for monitor in (self._monitor_output, self._pending_monitor):
+                if monitor is not None:
+                    monitor.push(monitor_audio)
         self._captured_blocks += 1
         if self._captured_blocks >= self._prefill_blocks:
             self._first_audio.set()
+
+    def set_monitor_voice(self, enabled: bool) -> None:
+        with self._outputs_lock:
+            if self._monitor_voice == enabled:
+                return
+            self._monitor_voice = enabled
+            for monitor in (self._monitor_output, self._pending_monitor):
+                if monitor is not None:
+                    monitor.clear()
 
     def replace_monitor(self, output_id: int | None, output_channels: int) -> None:
         if output_id is None:
@@ -2076,6 +2098,7 @@ class AudioEngine:
         self._input_device: str | None = None
         self._output_device: str | None = None
         self._monitor_output: str | None = None
+        self._effects_output: str | None = None
         self._noise_reduction_enabled = False
         self._spatial_settings = SpatialSettings()
         self._stopping = False
@@ -2159,10 +2182,14 @@ class AudioEngine:
         input_device: str,
         output_device: str,
         monitor_output: str | None = None,
+        *,
+        effects_output: str | None = None,
     ) -> None:
         input_device = input_device.strip()
         output_device = output_device.strip()
         monitor_output = monitor_output.strip() if monitor_output else None
+        effects_output = effects_output.strip() if effects_output else None
+        local_output = monitor_output or effects_output
         if not input_device:
             raise ValueError("Selecione um microfone de entrada.")
         if not output_device:
@@ -2172,11 +2199,11 @@ class AudioEngine:
                 "A entrada e a saída não podem ser o mesmo dispositivo; "
                 "isso causaria microfonia."
             )
-        if monitor_output == output_device:
+        if local_output == output_device:
             raise ValueError(
                 "A saída de retorno deve ser diferente da saída virtual."
             )
-        if monitor_output == input_device:
+        if local_output == input_device:
             raise ValueError(
                 "O retorno não pode usar o mesmo dispositivo de entrada."
             )
@@ -2193,13 +2220,17 @@ class AudioEngine:
                     input_device,
                     output_device,
                     self._settings,
-                    monitor_output,
+                    local_output,
+                    **({"monitor_voice": monitor_output is not None} if effects_output else {}),
                 )
             except Exception:
                 deactivate = getattr(self._backend, "deactivate", None)
                 if deactivate is not None:
                     deactivate()
                 raise
+            if effects_output is not None:
+                stream.set_monitor_voice(monitor_output is not None)
+            self._effects_output = effects_output
             self._stream = stream
             self._input_device = input_device
             self._output_device = output_device
@@ -2214,23 +2245,30 @@ class AudioEngine:
             self._thread = thread
             thread.start()
 
-    def update_monitor(self, monitor_output: str | None) -> None:
+    def update_monitor(self, monitor_output: str | None, *, effects_output: str | None = None) -> None:
         monitor_output = monitor_output.strip() if monitor_output else None
         with self._lock:
             if self._stream is None:
                 raise RuntimeError("A mesa não está ativa.")
-            if monitor_output == self._output_device:
+            effects_output = effects_output or self._effects_output
+            local_output = monitor_output or effects_output
+            if local_output == self._output_device:
                 raise ValueError(
                     "A saída de retorno deve ser diferente da saída virtual."
                 )
-            if monitor_output == self._input_device:
+            if local_output == self._input_device:
                 raise ValueError(
                     "O retorno não pode usar o mesmo dispositivo de entrada."
                 )
-            if monitor_output == self._monitor_output:
+            if monitor_output == self._monitor_output and effects_output == self._effects_output:
                 return
-            self._backend.update_monitor(monitor_output)
+            previous_output = self._monitor_output or self._effects_output
+            if local_output != previous_output:
+                self._backend.update_monitor(local_output)
+            if effects_output is not None:
+                self._stream.set_monitor_voice(monitor_output is not None)
             self._monitor_output = monitor_output
+            self._effects_output = effects_output
 
     def update_noise_reduction(self, enabled: bool) -> None:
         if not isinstance(enabled, bool):

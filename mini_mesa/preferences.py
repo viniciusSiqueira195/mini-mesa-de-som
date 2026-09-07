@@ -37,8 +37,32 @@ def legacy_preferences_paths() -> tuple[Path, ...]:
 
 
 @dataclass(frozen=True, slots=True)
+class PersonalSound:
+    name: str
+    path: str
+    page: int = 0
+
+
+def _personal_sounds(value: object) -> tuple[PersonalSound, ...]:
+    if not isinstance(value, list):
+        return ()
+    sounds = []
+    for index, item in enumerate(value):
+        if not isinstance(item, dict):
+            continue
+        name, path = item.get("name"), item.get("path")
+        if isinstance(name, str) and isinstance(path, str) and name.strip() and path.strip():
+            page = item.get("page", min(index // 10, 9))
+            if isinstance(page, bool) or not isinstance(page, int) or not 0 <= page < 10:
+                page = 0
+            sounds.append(PersonalSound(name.strip(), path.strip(), page))
+    return tuple(sounds)
+
+
+@dataclass(frozen=True, slots=True)
 class AppPreferences:
     welcome_shown: bool = False
+    last_seen_news_version: str = ""
     input_device: str = ""
     output_device: str = ""
     monitor_enabled: bool = False
@@ -77,6 +101,8 @@ class AppPreferences:
     soundboard_volume_percent: int = 80
     soundboard_ducking_enabled: bool = False
     soundboard_ducking_percent: int = 60
+    personal_sounds: tuple[PersonalSound, ...] = ()
+    selected_sound_page: int = 0
 
     @property
     def spatial_angle(self) -> int:
@@ -210,7 +236,13 @@ class AppPreferences:
         ):
             sb_volume = defaults.soundboard_volume_percent
 
+        selected_page = data.get("selected_sound_page", 0)
+        if isinstance(selected_page, bool) or not isinstance(selected_page, int) or not 0 <= selected_page < 10:
+            selected_page = 0
         return cls(
+            selected_sound_page=selected_page,
+            personal_sounds=_personal_sounds(data.get("personal_sounds")),
+            last_seen_news_version=text_value("last_seen_news_version", ""),
             welcome_shown=bool_value("welcome_shown", defaults.welcome_shown),
             input_device=text_value("input_device", defaults.input_device),
             output_device=text_value("output_device", defaults.output_device),
@@ -304,7 +336,7 @@ class PreferencesStore:
         try:
             with temporary_path.open("w", encoding="utf-8", newline="\n") as output:
                 json.dump(
-                    {"schema_version": 8, **asdict(preferences)},
+                    {"schema_version": 11, **asdict(preferences)},
                     output,
                     ensure_ascii=False,
                     indent=2,

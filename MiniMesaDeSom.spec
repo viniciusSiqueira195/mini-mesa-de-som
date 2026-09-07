@@ -1,17 +1,17 @@
-from PyInstaller.utils.hooks import collect_all, collect_data_files, copy_metadata
+from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_dynamic_libs, copy_metadata
 
 
-datas = collect_data_files("mini_mesa")
+datas = collect_data_files("mini_mesa", excludes=["assets/sounds/**"])
 datas.append(("README.md", "."))
 binaries = []
-hiddenimports = []
+hiddenimports = ["markdown.extensions.fenced_code", "markdown.extensions.sane_lists", "markdown.extensions.toc"]
 
 package_datas, package_binaries, package_hiddenimports = collect_all("pedalboard")
 datas += package_datas
 binaries += package_binaries
 hiddenimports += package_hiddenimports
 
-datas += collect_data_files("pyrnnoise")
+binaries += collect_dynamic_libs("pyrnnoise")
 datas += copy_metadata("pyrnnoise")
 
 analysis = Analysis(
