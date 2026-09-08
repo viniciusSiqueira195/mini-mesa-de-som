@@ -6,6 +6,7 @@ from dataclasses import replace
 from collections import deque
 from collections.abc import Callable, Sequence
 from itertools import product
+from pathlib import Path
 from queue import Empty, Full, Queue
 from typing import Protocol
 
@@ -18,7 +19,12 @@ from .settings import (
     SpatialSettings,
     VoiceSettings,
 )
-from .soundboard import SoundboardManager, SoundEffectInfo
+from .soundboard import (
+    SoundboardManager,
+    SoundEffectInfo,
+    _read_custom_audio,
+    _resample,
+)
 from .spatial_audio import HRTFSpatializer
 
 
@@ -746,6 +752,10 @@ class AudioBackend(Protocol):
 
     def play_sound(self, sound_id_or_path: str) -> bool: ...
 
+    def preview_sound(self, path: str, output_device: str) -> None: ...
+
+    def stop_preview(self) -> None: ...
+
     def update_monitor(self, monitor_output: str | None) -> None: ...
 
     def update_noise_reduction(self, enabled: bool) -> None: ...
@@ -838,6 +848,7 @@ class PedalboardBackend:
         self._processing_lock = threading.Lock()
         self._input_ids: dict[str, list[tuple[int, str]]] = {}
         self._output_ids: dict[str, list[tuple[int, str]]] = {}
+        self._input_level = 0.0
 
     def input_devices(self) -> Sequence[str]:
         self._refresh_devices()
@@ -861,6 +872,19 @@ class PedalboardBackend:
             item[0].casefold(),
         ))
         return tuple(label for label, _candidates in physical_outputs)
+
+    @property
+    def input_level(self) -> float:
+        return self._input_level
+
+    def diagnostic_details(self) -> dict[str, object]:
+        self._refresh_devices()
+        return {
+            "host_apis": [dict(api) for api in self._sd.query_hostapis()],
+            "devices": [dict(device) for device in self._sd.query_devices()],
+            "grouped_inputs": self._input_ids,
+            "grouped_outputs": self._output_ids,
+        }
 
     def _refresh_devices(self) -> None:
         devices = self._sd.query_devices()
@@ -1115,6 +1139,9 @@ class PedalboardBackend:
                 return output
 
             mono_input = self._np.mean(indata, axis=1, dtype=self._np.float32)
+            self._input_level = min(
+                1.0, float(self._np.sqrt(self._np.mean(mono_input * mono_input)))
+            )
             soundboard_audio = None
             soundboard_duck = 1.0
             soundboard = getattr(self, "_soundboard", None)
@@ -1221,6 +1248,25 @@ class PedalboardBackend:
         if self._soundboard is None:
             return False
         return self._soundboard.play(sound_id_or_path)
+
+    def preview_sound(self, path: str, output_device: str) -> None:
+        self._refresh_devices()
+        resolved = _resolve_device_label(output_device, self._output_ids, output=True)
+        candidates = sorted(
+            self._output_ids[resolved],
+            key=lambda candidate: _MONITOR_API_RANKS.get(candidate[1], 99),
+        )
+        if not candidates:
+            raise ValueError(f"O dispositivo de retorno '{output_device}' não está disponível.")
+        device_id = candidates[0][0]
+        device = self._sd.query_devices(device_id)
+        target_rate = float(device["default_samplerate"])
+        audio, source_rate = _read_custom_audio(Path(path))
+        prepared = _resample(audio, source_rate, target_rate)
+        self._sd.play(prepared, samplerate=target_rate, device=device_id, blocking=False)
+
+    def stop_preview(self) -> None:
+        self._sd.stop()
 
     def _rebuild_effects_chain(self) -> None:
         if self._reverb is None:
@@ -2138,6 +2184,14 @@ class AudioEngine:
     def monitor_devices(self) -> tuple[str, ...]:
         return tuple(self._backend.monitor_devices())
 
+    @property
+    def input_level(self) -> float:
+        return float(getattr(self._backend, "input_level", 0.0))
+
+    def diagnostic_details(self) -> dict[str, object]:
+        method = getattr(self._backend, "diagnostic_details", None)
+        return method() if method is not None else {}
+
     def update_settings(self, settings: ReverbSettings) -> None:
         with self._lock:
             if self._stream is not None:
@@ -2172,6 +2226,21 @@ class AudioEngine:
             if self._stream is None:
                 return False
             return self._backend.play_sound(sound_id_or_path)
+
+    def preview_sound(self, path: str, output_device: str) -> None:
+        with self._lock:
+            if self._stream is not None:
+                if not self._backend.play_sound(path):
+                    raise ValueError("Não foi possível carregar o efeito.")
+                return
+            self._backend.preview_sound(path, output_device)
+
+    def stop_preview(self) -> None:
+        with self._lock:
+            if self._stream is not None:
+                self._backend.stop_sound_effects()
+            else:
+                self._backend.stop_preview()
 
     def set_error_handler(self, handler: Callable[[str], None] | None) -> None:
         with self._lock:
@@ -2325,6 +2394,7 @@ class AudioEngine:
                     self._input_device = None
                     self._output_device = None
                     self._monitor_output = None
+                    self._effects_output = None
                 self._stopping = False
 
     def _run_stream(self, stream: AudioStream) -> None:

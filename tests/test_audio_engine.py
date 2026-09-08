@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import numpy as np
 
@@ -85,6 +85,8 @@ class FakeBackend:
         self.pro_audio_settings = ProAudioSettings()
         self.soundboard_settings = SoundboardSettings()
         self.played_sounds: list[str] = []
+        self.previewed_sounds: list[tuple[str, str]] = []
+        self.preview_stops = 0
         self.deactivate_calls = 0
 
     def input_devices(self) -> tuple[str, ...]:
@@ -126,6 +128,12 @@ class FakeBackend:
     def play_sound(self, sound_id_or_path: str) -> bool:
         self.played_sounds.append(sound_id_or_path)
         return True
+
+    def preview_sound(self, path: str, output_device: str) -> None:
+        self.previewed_sounds.append((path, output_device))
+
+    def stop_preview(self) -> None:
+        self.preview_stops += 1
 
     def update_monitor(self, monitor_output: str | None) -> None:
         self.updated_monitors.append(monitor_output)
@@ -1533,6 +1541,41 @@ if __name__ == "__main__":
 
 
 class EffectsOnlyMonitoringTests(unittest.TestCase):
+    def test_backend_preview_resamples_and_uses_selected_physical_output(self):
+        backend = PedalboardBackend()
+        fake_sd = Mock()
+        fake_sd.query_devices.return_value = {"default_samplerate": 48_000}
+        backend._sd = fake_sd
+        backend._output_ids = {"Fones": [(7, "Windows WASAPI")]}
+        source = np.full((24, 2), 0.25, dtype=np.float32)
+        with (
+            patch.object(backend, "_refresh_devices"),
+            patch("mini_mesa.audio_engine._read_custom_audio", return_value=(source, 24_000)),
+        ):
+            backend.preview_sound("efeito.flac", "Fones")
+        played = fake_sd.play.call_args
+        self.assertEqual(played.kwargs["samplerate"], 48_000)
+        self.assertEqual(played.kwargs["device"], 7)
+        self.assertEqual(played.args[0].shape, (48, 2))
+        backend.stop_preview()
+        fake_sd.stop.assert_called_once()
+
+    def test_preview_uses_output_only_while_stopped_and_soundboard_while_running(self):
+        backend = FakeBackend()
+        engine = AudioEngine(backend)
+        engine.preview_sound("preview.wav", "Fones")
+        self.assertEqual(backend.previewed_sounds, [("preview.wav", "Fones")])
+        engine.stop_preview()
+        self.assertEqual(backend.preview_stops, 1)
+        try:
+            engine.start("FIFINE AM8", "CABLE Input", effects_output="Alto-falantes")
+            engine.preview_sound("live.wav", "Fones")
+            self.assertEqual(backend.played_sounds, ["live.wav"])
+            engine.stop_preview()
+            self.assertEqual(backend.effects_stopped, 1)
+        finally:
+            engine.stop()
+
     def test_real_sound_reaches_both_routes_but_microphone_only_reaches_recording(self):
         import tempfile
         from pathlib import Path

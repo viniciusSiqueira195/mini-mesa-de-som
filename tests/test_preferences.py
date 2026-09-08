@@ -28,14 +28,22 @@ class PreferencesStoreTests(unittest.TestCase):
                 spatial_z=-40,
                 spatial_automatic=True,
                 spatial_speed=60,
+                sound_page_names=("Memes",) + tuple(
+                    f"Página {number}" for number in range(2, 11)
+                ),
+                global_shortcuts_enabled=True,
+                global_effect_modifier="control_alt",
+                global_page_modifier="alt_shift",
+                feedback_sounds_enabled=True,
             )
 
             store.save(expected)
 
             self.assertEqual(store.load(), expected)
             saved = json.loads(path.read_text(encoding="utf-8"))
-            self.assertEqual(saved["schema_version"], 11)
+            self.assertEqual(saved["schema_version"], 12)
             self.assertEqual(saved["input_device"], "Microfone Áudio")
+            self.assertEqual(saved["sound_page_names"][0], "Memes")
 
     def test_invalid_file_falls_back_to_defaults(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -102,6 +110,20 @@ class PreferencesStoreTests(unittest.TestCase):
         self.assertEqual(preferences.spatial_x, -100)
         self.assertEqual(preferences.spatial_y, 0)
         self.assertEqual(preferences.spatial_z, 0)
+
+    def test_invalid_accessibility_preferences_fall_back_safely(self) -> None:
+        preferences = AppPreferences.from_dict({
+            "sound_page_names": ["somente uma"],
+            "global_shortcuts_enabled": "sim",
+            "global_effect_modifier": "windows",
+            "global_page_modifier": "control",
+            "feedback_sounds_enabled": 1,
+        })
+        self.assertEqual(preferences.sound_page_names[0], "Página 1")
+        self.assertFalse(preferences.global_shortcuts_enabled)
+        self.assertEqual(preferences.global_effect_modifier, "control")
+        self.assertEqual(preferences.global_page_modifier, "alt")
+        self.assertFalse(preferences.feedback_sounds_enabled)
 
     def test_legacy_voice_pitch_migrates_to_the_matching_preset(self) -> None:
         preferences = AppPreferences.from_dict(

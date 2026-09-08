@@ -2,6 +2,18 @@
 
 ## 1.1.0 — Em testes
 
+- Atalhos globais opcionais e configuráveis para páginas, efeitos e parada,
+  com detecção de conflitos e liberação transacional das combinações.
+- Páginas com nomes personalizados, busca por efeito e movimentação dentro da
+  lista ou entre páginas; a posição e o atalho são atualizados juntos.
+- Perfis completos para alternar dispositivos, processamento, volumes e sons.
+- Backup de configurações com opção portátil que inclui os áudios, além de
+  importação com validação de caminhos e limites antes da extração.
+- Diagnóstico acessível e copiável com dispositivos e APIs de áudio.
+- Prévia local de um arquivo antes de adicioná-lo, inclusive com a mesa parada,
+  sem abrir o microfone ou enviar áudio para o cabo virtual.
+- Indicador textual estável de nível do microfone e avisos sonoros locais opcionais.
+- Confirmação antes de excluir efeitos e perfis.
 - Janela acessível de novidades exibida uma vez por versão, com acesso permanente
   pelo menu Ajuda e arquivo de texto incluído no instalador.
 

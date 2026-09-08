@@ -31,7 +31,8 @@ class PackagingTests(unittest.TestCase):
             executable.touch()
             result_path = root / "result.json"
             result = dict(ok=True, pedalboard=True, rnnoise=True, hrtf=True,
-                          interface=True, help=True, release_notes=True, codecs=["wav", "mp3", "flac", "ogg"])
+                          interface=True, help=True, release_notes=True,
+                          user_features=True, codecs=["wav", "mp3", "flac", "ogg"])
 
             def run(command, **kwargs):
                 self.assertEqual(command, [str(executable), "--self-test", str(result_path)])

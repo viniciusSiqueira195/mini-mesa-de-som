@@ -19,12 +19,18 @@ def _self_test(result_path: Path) -> int:
         import sounddevice as sd
         import wx
         from mini_mesa import ui
-        from mini_mesa.preferences import AppPreferences, PreferencesStore
+        from mini_mesa.preferences import AppPreferences, PersonalSound, PreferencesStore
         from mini_mesa.soundboard import SoundboardMixer
         from mini_mesa.audio_engine import AudioEngine, PedalboardBackend
         from mini_mesa.noise_reduction import RNNOISE_FRAME_SIZE, RNNoiseReducer
         from mini_mesa.settings import SpatialSettings
         from mini_mesa.spatial_audio import HRTFSpatializer
+        from mini_mesa.user_features import (
+            ProfileStore,
+            diagnostic_text,
+            export_backup,
+            import_backup,
+        )
 
         backend = PedalboardBackend()
         input_devices = backend.input_devices()
@@ -55,14 +61,31 @@ def _self_test(result_path: Path) -> int:
                 mixer = SoundboardMixer()
                 if not mixer.play(str(path)) or not np.any(mixer.mix(4800)):
                     raise RuntimeError(f"O codec {extension} não funciona no pacote.")
+            preferences = AppPreferences(
+                welcome_shown=True,
+                last_seen_news_version=ui.__version__,
+                personal_sounds=(PersonalSound("Teste", str(root / "probe.wav")),),
+            )
             store = PreferencesStore(root / "preferences.json")
-            store.save(AppPreferences(welcome_shown=True, last_seen_news_version=ui.__version__))
+            store.save(preferences)
+            profiles = ProfileStore(root / "profiles.json")
+            profiles.save("Teste", preferences)
+            if profiles.load("Teste", preferences).personal_sounds != preferences.personal_sounds:
+                raise RuntimeError("Os perfis não funcionam no pacote.")
+            backup = root / "teste.mmb"
+            export_backup(preferences, backup, include_audio=True)
+            restored = import_backup(backup, root / "restored-audio")
+            if not Path(restored.personal_sounds[0].path).is_file():
+                raise RuntimeError("O backup portátil não restaurou o áudio.")
+            engine = AudioEngine(backend)
+            if "Entradas encontradas" not in diagnostic_text(engine, preferences):
+                raise RuntimeError("O diagnóstico acessível não funciona no pacote.")
             app = wx.App.Get() or wx.App(False)
             original_tray, original_update = ui.SystemTrayIcon, ui.can_self_update
             try:
                 ui.SystemTrayIcon = lambda _frame: None
                 ui.can_self_update = lambda: False
-                frame = ui.MainFrame(AudioEngine(backend), preferences_store=store)
+                frame = ui.MainFrame(engine, preferences_store=store)
                 frame.Destroy()
                 frame = None
                 app.ProcessPendingEvents()
@@ -79,6 +102,7 @@ def _self_test(result_path: Path) -> int:
             interface=True,
             help=True,
             release_notes=True,
+            user_features=True,
             codecs=["wav", "mp3", "flac", "ogg"],
             device_inventory=[dict(device) for device in sd.query_devices()],
             host_apis=[dict(api) for api in sd.query_hostapis()],

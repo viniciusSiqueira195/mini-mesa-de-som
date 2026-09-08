@@ -59,6 +59,16 @@ def _personal_sounds(value: object) -> tuple[PersonalSound, ...]:
     return tuple(sounds)
 
 
+def _page_names(value: object) -> tuple[str, ...]:
+    defaults = tuple(f"Página {number}" for number in range(1, 11))
+    if not isinstance(value, list) or len(value) != 10:
+        return defaults
+    return tuple(
+        name.strip() if isinstance(name, str) and name.strip() else defaults[index]
+        for index, name in enumerate(value)
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class AppPreferences:
     welcome_shown: bool = False
@@ -103,6 +113,13 @@ class AppPreferences:
     soundboard_ducking_percent: int = 60
     personal_sounds: tuple[PersonalSound, ...] = ()
     selected_sound_page: int = 0
+    sound_page_names: tuple[str, ...] = tuple(
+        f"Página {number}" for number in range(1, 11)
+    )
+    global_shortcuts_enabled: bool = False
+    global_effect_modifier: str = "control"
+    global_page_modifier: str = "alt"
+    feedback_sounds_enabled: bool = False
 
     @property
     def spatial_angle(self) -> int:
@@ -242,6 +259,15 @@ class AppPreferences:
         return cls(
             selected_sound_page=selected_page,
             personal_sounds=_personal_sounds(data.get("personal_sounds")),
+            sound_page_names=_page_names(data.get("sound_page_names")),
+            global_shortcuts_enabled=bool_value("global_shortcuts_enabled", False),
+            global_effect_modifier=text_value("global_effect_modifier", "control")
+            if text_value("global_effect_modifier", "control") in {"control", "control_alt"}
+            else "control",
+            global_page_modifier=text_value("global_page_modifier", "alt")
+            if text_value("global_page_modifier", "alt") in {"alt", "alt_shift"}
+            else "alt",
+            feedback_sounds_enabled=bool_value("feedback_sounds_enabled", False),
             last_seen_news_version=text_value("last_seen_news_version", ""),
             welcome_shown=bool_value("welcome_shown", defaults.welcome_shown),
             input_device=text_value("input_device", defaults.input_device),
@@ -336,7 +362,7 @@ class PreferencesStore:
         try:
             with temporary_path.open("w", encoding="utf-8", newline="\n") as output:
                 json.dump(
-                    {"schema_version": 11, **asdict(preferences)},
+                    {"schema_version": 12, **asdict(preferences)},
                     output,
                     ensure_ascii=False,
                     indent=2,

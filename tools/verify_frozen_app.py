@@ -33,7 +33,15 @@ def verify(executable: Path, result_path: Path) -> dict:
     result = json.loads(result_path.read_text(encoding="utf-8"))
     if process.returncode != 0 or result.get("ok") is not True:
         raise RuntimeError(f"Autoteste do pacote falhou: {result.get('error', result)}")
-    for feature in ("pedalboard", "rnnoise", "hrtf", "interface", "help", "release_notes"):
+    for feature in (
+        "pedalboard",
+        "rnnoise",
+        "hrtf",
+        "interface",
+        "help",
+        "release_notes",
+        "user_features",
+    ):
         if result.get(feature) is not True:
             raise RuntimeError(f"Autoteste incompleto: {feature}.")
     if set(result.get("codecs", [])) != {"wav", "mp3", "flac", "ogg"}:

@@ -17,6 +17,13 @@ class PersonalSoundPanelTests(unittest.TestCase):
         cls.app = ui.wx.App.Get() or ui.wx.App(False)
 
     def setUp(self):
+        self.confirmation = patch.object(ui.wx, "MessageBox", return_value=ui.wx.YES)
+        self.confirmation.start()
+        self.addCleanup(self.confirmation.stop)
+        self.preview = patch.object(ui, "SoundPreviewDialog")
+        preview_factory = self.preview.start()
+        preview_factory.return_value.ShowModal.return_value = ui.wx.ID_OK
+        self.addCleanup(self.preview.stop)
         self.directory = TemporaryDirectory()
         self.root = Path(self.directory.name)
         self.path = self.root / "Minha vinheta.wav"
@@ -195,7 +202,7 @@ class PersonalSoundPanelTests(unittest.TestCase):
         event = ui.wx.CommandEvent(ui.wx.EVT_CHOICE.typeId, self.panel.page_choice.GetId())
         self.panel.page_choice.ProcessEvent(event)
         self.assertEqual(ui.wx.Window.FindFocus(), self.panel.page_choice)
-        self.assertEqual(self.panel.add_button.GetName(), "Adicionar efeitos, página 3")
+        self.assertEqual(self.panel.add_button.GetName(), "Adicionar efeitos, Página 3")
         self.add_sound()
         self.assertEqual(self.store.load().personal_sounds[0].page, 2)
         self.assertNotIn(str(self.path), self.panel.effect_list.GetString(0))
@@ -208,12 +215,14 @@ class PersonalSoundPanelTests(unittest.TestCase):
         try:
             items = menu.GetMenuItems()
             self.assertEqual([item.GetItemLabelText() for item in items], [
-                "Tocar", "Renomear...", "Substituir arquivo...", "Excluir do painel", "Parar todos os efeitos"
+                "Tocar", "Renomear...", "Substituir arquivo...", "Mover para cima",
+                "Mover para baixo", "Mover para outra página...", "Excluir do painel",
+                "Parar todos os efeitos"
             ])
             with patch.object(self.frame, "play_personal_sound") as play:
                 menu.ProcessEvent(ui.wx.CommandEvent(ui.wx.EVT_MENU.typeId, items[0].GetId()))
                 play.assert_called_once_with(second)
-            menu.ProcessEvent(ui.wx.CommandEvent(ui.wx.EVT_MENU.typeId, items[3].GetId()))
+            menu.ProcessEvent(ui.wx.CommandEvent(ui.wx.EVT_MENU.typeId, items[6].GetId()))
             self.assertEqual(len(self.store.load().personal_sounds), 1)
             self.assertEqual(self.store.load().personal_sounds[0].name, "Minha vinheta")
             self.assertTrue(self.path.is_file())
@@ -255,6 +264,62 @@ class PersonalSoundPanelTests(unittest.TestCase):
             self.panel._show_effect_menu()
             popup.assert_not_called()
         self.assertFalse(self.panel.actions_button.IsEnabled())
+
+    def test_page_can_be_named_and_name_survives_reopening(self):
+        with patch.object(ui.wx, "TextEntryDialog") as factory:
+            dialog = factory.return_value.__enter__.return_value
+            dialog.ShowModal.return_value = ui.wx.ID_OK
+            dialog.GetValue.return_value = " Memes "
+            self.panel._on_rename_page(None)
+        self.assertEqual(self.panel.page_choice.GetString(0), "Memes")
+        self.assertEqual(self.panel.add_button.GetName(), "Adicionar efeitos, Memes")
+        self.frame.Destroy()
+        self.app.ProcessPendingEvents()
+        self.frame = self.open_frame()
+        self.assertEqual(self.frame.soundboard_panel.page_choice.GetString(0), "Memes")
+
+    def test_search_keeps_original_shortcuts_and_selected_action(self):
+        effects = [
+            PersonalSound("Abertura", str(self.path)),
+            PersonalSound("Risada", str(self.path)),
+            PersonalSound("Encerramento", str(self.path)),
+        ]
+        self.panel._commit_effects(effects, 0)
+        self.panel.search.ChangeValue("risa")
+        self.panel._on_search(None)
+        self.assertEqual(self.panel.effect_list.GetCount(), 1)
+        self.assertEqual(self.panel.effect_list.GetString(0), "Risada; Ctrl+2")
+        with patch.object(self.frame, "play_personal_sound") as play:
+            self.panel._on_play(None)
+            play.assert_called_once_with(effects[1])
+
+    def test_effect_can_move_within_and_between_pages(self):
+        effects = [
+            PersonalSound("Primeiro", str(self.path)),
+            PersonalSound("Segundo", str(self.path)),
+        ]
+        self.panel._commit_effects(effects, 1)
+        self.panel._move_selected(-1)
+        self.assertEqual([sound.name for sound in self.panel._effects], ["Segundo", "Primeiro"])
+        chooser = Mock()
+        chooser.__enter__ = Mock(return_value=chooser)
+        chooser.__exit__ = Mock(return_value=False)
+        chooser.ShowModal.return_value = ui.wx.ID_OK
+        chooser.GetSelection.return_value = 0
+        with patch.object(ui.wx, "SingleChoiceDialog", return_value=chooser):
+            self.panel._on_move_to_page(None)
+        saved = self.store.load().personal_sounds
+        self.assertEqual(
+            {(sound.name, sound.page) for sound in saved},
+            {("Primeiro", 0), ("Segundo", 1)},
+        )
+
+    def test_delete_requires_confirmation(self):
+        self.add_sound()
+        with patch.object(ui.wx, "MessageBox", return_value=ui.wx.NO):
+            self.panel._on_remove(None)
+        self.assertEqual(len(self.panel._effects), 1)
+        self.assertTrue(self.path.exists())
 
     def test_enter_plays_and_space_stops(self):
         self.add_sound()

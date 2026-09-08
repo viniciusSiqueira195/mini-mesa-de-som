@@ -16,6 +16,8 @@ COMO ADICIONAR
 
 Depois de adicionar, o foco vai para o novo som. A lista e a página escolhida
 são salvas automaticamente. Não é preciso ativar a mesa para cadastrar sons.
+Antes de confirmar, o botão Ouvir prévia toca o arquivo apenas nos fones
+escolhidos. A prévia funciona mesmo com a mesa desligada e não abre o microfone.
 
 COMO TOCAR
 
@@ -40,6 +42,47 @@ arquivo, Excluir do painel e Parar todos os efeitos.
 
 Excluir do painel não apaga o arquivo original. Os sons permanecem no local
 escolhido; se mover ou apagar um arquivo, use Substituir arquivo para localizá-lo.
+
+ORGANIZE E ENCONTRE MAIS RÁPIDO
+
+Cada página pode receber um nome, como Memes, Programa ou Aberturas. A busca
+mostra apenas os efeitos cujo nome contém o texto digitado e preserva seus
+atalhos originais. No menu de ações, você também pode mover o efeito para cima,
+para baixo ou para outra página. A posição define o atalho Ctrl correspondente.
+
+Excluir um efeito ou perfil agora exige confirmação acessível.
+
+ATALHOS GLOBAIS
+
+Em Ferramentas, Configurar atalhos globais, você pode permitir que os efeitos
+sejam tocados enquanto Discord, TeamTalk, um gravador ou outro programa estiver
+em foco. Eles ficam desligados por padrão para não capturar combinações sem sua
+permissão. É possível escolher os modificadores dos efeitos e das páginas.
+Se outra aplicação já usar uma combinação, a Mini Mesa informa o conflito e
+desativa o conjunto, sem deixar atalhos registrados pela metade.
+
+PERFIS, BACKUP E DIAGNÓSTICO
+
+O menu Ferramentas permite salvar perfis completos, carregar um perfil e
+excluir perfis antigos. Cada perfil guarda dispositivos, processamento de voz,
+volumes, páginas e efeitos.
+
+Exportar backup pode criar um arquivo pequeno apenas com configurações e
+caminhos, ou um backup portátil que inclui cópias dos áudios. Importar backup
+restaura a configuração e, quando necessário, extrai os sons para a pasta de
+dados da Mini Mesa. A importação valida tamanhos e caminhos antes de extrair.
+
+Abrir diagnóstico apresenta entradas, saídas, retornos, dispositivos escolhidos
+e APIs de áudio. O botão Copiar diagnóstico prepara o relato para ser enviado
+ao desenvolvedor quando algum dispositivo não aparecer.
+
+NÍVEL DO MICROFONE E AVISOS LOCAIS
+
+A janela mostra um indicador textual: sem sinal, microfone baixo, nível adequado
+ou saturando. O NVDA recebe anúncio somente depois que o estado permanece
+estável, reduzindo repetições. Em Ferramentas, Avisos sonoros locais ativa sinais
+curtos para ligar ou desligar a mesa e trocar de página. Esses sinais não são
+misturados na saída virtual.
 
 OUÇA OS EFEITOS SEM OUVIR SUA VOZ
 
