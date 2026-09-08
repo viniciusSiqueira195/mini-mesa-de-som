@@ -178,9 +178,10 @@ novidades da versão. Use as setas para ler, Ctrl+Home para voltar ao início e
 Escape ou o botão Fechar novidades para fechar. A leitura é registrada nas
 preferências para que a janela não apareça em todas as aberturas.
 
-O menu **Ajuda > Novidades desta versão** permite reler o texto. Os arquivos
-ficam em `mini_mesa/assets/novidades`, com o número da versão no nome, e são
-incluídos no pacote e verificados pelo autoteste do executável.
+O menu **Ajuda > Novidades desta versão** permite reler o texto. A janela usa a
+seção correspondente à versão instalada no `CHANGELOG.md`. Assim, o programa,
+o GitHub e os textos de divulgação compartilham uma única fonte completa. Esse
+arquivo é incluído no pacote e verificado pelo autoteste do executável.
 
 ## Atualizações
 

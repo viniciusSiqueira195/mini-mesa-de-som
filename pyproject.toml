@@ -31,7 +31,6 @@ include = ["mini_mesa*"]
 
 [tool.setuptools.package-data]
 mini_mesa = [
-    "assets/novidades/*.txt",
     "assets/hrtf/mit_kemar/*.wav",
     "assets/hrtf/mit_kemar/NOTICE.txt",
 ]

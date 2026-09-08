@@ -3,6 +3,7 @@ from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_dyn
 
 datas = collect_data_files("mini_mesa", excludes=["assets/sounds/**"])
 datas.append(("README.md", "."))
+datas.append(("CHANGELOG.md", "."))
 binaries = []
 hiddenimports = ["markdown.extensions.fenced_code", "markdown.extensions.sane_lists", "markdown.extensions.toc"]
 
