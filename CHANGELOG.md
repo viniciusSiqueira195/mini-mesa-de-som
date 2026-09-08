@@ -1,47 +1,124 @@
 # Histórico de versões
 
-## 1.1.0 — Em testes
+## 1.1.0 — 2026-09-07
 
-- Atalhos globais opcionais e configuráveis para páginas, efeitos e parada,
-  com detecção de conflitos e liberação transacional das combinações.
-- Páginas com nomes personalizados, busca por efeito e movimentação dentro da
-  lista ou entre páginas; a posição e o atalho são atualizados juntos.
-- Perfis completos para alternar dispositivos, processamento, volumes e sons.
-- Backup de configurações com opção portátil que inclui os áudios, além de
-  importação com validação de caminhos e limites antes da extração.
-- Diagnóstico acessível e copiável com dispositivos e APIs de áudio.
-- Prévia local de um arquivo antes de adicioná-lo, inclusive com a mesa parada,
-  sem abrir o microfone ou enviar áudio para o cabo virtual.
-- Indicador textual estável de nível do microfone e avisos sonoros locais opcionais.
-- Confirmação antes de excluir efeitos e perfis.
-- Janela acessível de novidades exibida uma vez por versão, com acesso permanente
-  pelo menu Ajuda e arquivo de texto incluído no instalador.
+Esta é uma grande atualização da Mini Mesa de Som, com um painel de efeitos
+totalmente pessoal, melhorias de acessibilidade, nova organização da interface
+e ferramentas para facilitar configuração, suporte e troca de computador.
 
-- Saídas de retorno disponíveis apenas por MME ou DirectSound deixam de ser
-  ocultadas quando também existe um dispositivo WASAPI.
-- Build passa a exigir autoteste do executável, com interface, ajuda, codecs,
-  RNNoise e HRTF; corrigido o parâmetro espacial desatualizado desse autoteste.
-- Inclusão explícita das extensões Markdown e coleta da DLL do RNNoise como
-  binário, permitindo ao PyInstaller verificar suas dependências nativas.
+### Painel de efeitos pessoais
 
-- Painel simplificado: escolher página, adicionar efeitos à página indicada e
-  navegar por uma lista com nomes e atalhos curtos.
-- Menu de contexto dos efeitos com tocar, renomear, substituir, excluir e parar,
-  acessível pelo botão direito, tecla Aplicações, Shift+F10 ou botão Ações do efeito.
+- O antigo conjunto de sons predefinidos foi substituído por um painel inicialmente
+  vazio. Cada pessoa escolhe os próprios arquivos no computador.
+- São dez páginas, com até dez efeitos em cada uma, totalizando cem posições.
+- São aceitos arquivos WAV, MP3, FLAC e OGG, com até dez minutos e 256 MB por arquivo.
+- `Ctrl+Shift+E` abre o Painel de efeitos e `F6` adiciona um som à página atual,
+  mesmo quando a mesa está desligada.
+- Antes de adicionar, é possível ouvir uma prévia no dispositivo de retorno. A
+  prévia não abre o microfone nem envia o arquivo ao cabo virtual.
+- `Alt+1` a `Alt+9` selecionam as páginas 1 a 9; `Alt+0` seleciona a página 10.
+- `Ctrl+1` a `Ctrl+9` tocam as posições 1 a 9 da página atual; `Ctrl+0` toca a
+  décima posição. `Ctrl+Shift+0` para todos os efeitos.
+- `F2`, `F3` e `F4` continuam disponíveis para as três primeiras posições.
+- Cada página pode receber um nome personalizado, como Memes, Aberturas ou Programa.
+- A busca filtra a página pelo nome sem alterar a posição nem o atalho dos efeitos.
+- Os efeitos podem ser movidos para cima, para baixo ou para outra página. A nova
+  posição passa a definir automaticamente o atalho correspondente.
+- A lista apresenta nomes e atalhos curtos para reduzir a leitura pelo NVDA.
+- `Enter` toca o efeito selecionado e `Espaço` para todos os efeitos.
+- O menu de contexto oferece Tocar, Renomear, Substituir arquivo, Mover, Excluir
+  do painel e Parar todos. Ele abre pelo botão direito, tecla Aplicações,
+  `Shift+F10` ou pelo botão Ações do efeito.
+- Excluir remove apenas o cadastro da mesa e preserva o arquivo original. Uma
+  confirmação acessível evita exclusões acidentais.
+- Arquivos ausentes, muito grandes, longos ou inválidos produzem mensagens de erro
+  acessíveis. Se o arquivo for movido, a opção Substituir permite localizá-lo.
+- O instalador não distribui gravações ou efeitos sonoros predefinidos.
 
-- Os efeitos são ouvidos automaticamente no dispositivo de retorno, mesmo com
-  o retorno da voz desligado, sem nova opção. Ativar o retorno completo não duplica os sons.
+### Escuta dos efeitos e atalhos globais
 
-- Painel de efeitos inicialmente vazio, com cadastro de arquivos locais, renomeação,
-  substituição e remoção sem apagar o áudio original.
-- Dez páginas pessoais com dez efeitos por página: Alt+1 a Alt+0 escolhem a
-  página e Ctrl+1 a Ctrl+0 reproduzem seus efeitos. Ctrl+Shift+0 para todos.
-- F6 adiciona à página atual, mesmo com a mesa desativada.
-- Windows+M oculta a mesa na bandeja, mantendo o áudio, e solicita uma notificação
-  com instruções de restauração. Ao abrir pela bandeja, a janela volta ao Alt+Tab.
-- Restauração cancela ocultamentos pendentes, impedindo que a janela suma novamente.
-- Validação de arquivos e mensagens acessíveis para falhas de reprodução ou gravação.
-- Empacotamento sem gravações predefinidas do soundboard.
+- Os efeitos são ouvidos automaticamente no dispositivo de retorno escolhido,
+  mesmo quando Ouvir retorno está desligado. Assim é possível gravar sem ouvir a
+  própria voz e ainda conferir cada efeito em tempo real.
+- Quando o retorno completo da voz é ligado, o efeito não é reproduzido em dobro.
+- Em Ferramentas, Configurar atalhos globais, os comandos podem funcionar enquanto
+  Discord, TeamTalk, gravadores e outros programas estão em foco.
+- Os atalhos globais ficam desligados por padrão. É possível escolher `Ctrl` ou
+  `Ctrl+Alt` para os efeitos e `Alt` ou `Alt+Shift` para as páginas.
+- A mesa detecta combinações ocupadas por outros programas. Em caso de conflito,
+  desativa o conjunto e libera os registros já feitos para não deixar atalhos presos.
+
+### Interface e acessibilidade
+
+- Os controles foram organizados nas guias Dispositivos, Voz e efeitos, Limpeza
+  da voz, Áudio 3D e Painel de efeitos.
+- `Ctrl+Tab` e `Ctrl+Shift+Tab` alternam as guias. Trocar de guia mantém o áudio e
+  todos os efeitos ativos.
+- Os botões informam ao leitor de telas a ação disponível e se o recurso está
+  ligado ou desligado.
+- O Painel de efeitos segue um fluxo direto: escolher a página, adicionar e
+  navegar pela lista. O botão de adição anuncia a página que receberá o arquivo.
+- Um indicador textual informa sem sinal, microfone baixo, nível adequado ou
+  saturando. O NVDA só recebe um novo anúncio depois que o estado se estabiliza,
+  evitando repetição excessiva.
+- Avisos sonoros locais opcionais podem sinalizar quando a mesa liga, desliga ou
+  muda de página. Esses avisos não são enviados à saída virtual.
+- Uma janela acessível mostra as novidades uma vez após cada atualização. O texto
+  permanece disponível em Ajuda, Novidades desta versão.
+- Os presets experimentais de auto-tune e vocoder foram removidos porque não
+  entregavam a afinação esperada. Configurações antigas são migradas com segurança.
+
+### Perfis, backup e diagnóstico
+
+- Perfis completos permitem salvar e recuperar dispositivos, processamento de
+  voz, volumes, páginas e efeitos. A exclusão de perfil exige confirmação.
+- Exportar backup cria um arquivo `.mmb` somente com configurações e caminhos ou
+  um backup portátil contendo cópias dos áudios.
+- Importar backup restaura as configurações e extrai os sons portáteis para a
+  pasta de dados da Mini Mesa. Caminhos e tamanhos são validados antes da extração.
+- Abrir diagnóstico mostra entradas, saídas, retornos, dispositivos selecionados
+  e APIs de áudio. O relatório pode ser copiado e enviado ao suporte.
+
+### Bandeja, dispositivos e estabilidade
+
+- `Windows+M` oculta a mesa na bandeja sem interromper o áudio. Uma notificação
+  curta explica que a janela pode ser restaurada pela bandeja do sistema.
+- Ao restaurar pela bandeja, a janela volta a aparecer no `Alt+Tab`.
+- Foi corrigida a condição que podia ocultar a janela novamente logo após sua
+  restauração.
+- Saídas disponíveis somente por MME ou DirectSound agora aparecem na lista de
+  retorno mesmo quando o computador também possui dispositivos WASAPI.
+- A continuidade do áudio foi reforçada ao alternar guias e controles, com filas
+  separadas para impedir que problemas no retorno bloqueiem a gravação ou chamada.
+- A atualização preserva preferências e efeitos pessoais já cadastrados.
+
+### Instalador e verificação
+
+- O instalador mantém o mesmo identificador das versões anteriores e atualiza a
+  instalação existente sem apagar as preferências do usuário.
+- A instalação opcional do VB-CABLE reconhece instalações existentes, inclusive
+  dispositivos desativados, e preserva os dispositivos padrão de reprodução,
+  comunicação e gravação.
+- O pacote inclui explicitamente a ajuda, as novidades, extensões Markdown,
+  bibliotecas nativas do RNNoise e dados do áudio espacial HRTF.
+- A geração do instalador agora exige um autoteste do executável isolado do ambiente
+  de desenvolvimento. Ele verifica interface, ajuda, novidades, dispositivos,
+  Pedalboard, RNNoise, HRTF, perfis, backup, diagnóstico e os formatos WAV, MP3,
+  FLAC e OGG.
+- O instalador é acompanhado por um arquivo SHA-256, usado pelo atualizador para
+  confirmar a integridade antes de executar a instalação.
+
+### Como começar
+
+1. Abra o Painel de efeitos com `Ctrl+Shift+E`.
+2. Escolha uma página com as setas ou com `Alt+1` a `Alt+0`.
+3. Pressione `F6`, escolha um arquivo e use Ouvir prévia se desejar conferi-lo.
+4. Confirme a adição. A posição na lista define o atalho `Ctrl` correspondente.
+5. Ative a mesa e use `Ctrl+1` a `Ctrl+0` para tocar os efeitos da página atual.
+
+Para restaurar a janela depois de `Windows+M`, pressione `Windows+B`, localize
+Mini Mesa de Som, abra o menu com a tecla Aplicações ou `Shift+F10` e escolha
+Abrir Mini Mesa de Som.
 
 ## 1.0.0 — 2026-09-01
 
