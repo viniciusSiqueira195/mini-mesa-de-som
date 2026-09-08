@@ -222,8 +222,9 @@ O foco fica no seletor de guias; `Tab` entra nos controles da guia selecionada.
 Os controles das outras guias ficam ocultos. Trocar de guia mantém o áudio e
 todos os efeitos ativos, inclusive os configurados em outra guia.
 
-Os botões de efeitos mostram a ação **Ativar** ou **Desativar** e o estado
-**Ligado** ou **Desligado**. Pressione `Espaço` para alternar o botão em foco.
+Os botões de efeitos mostram a ação **Ativar** ou **Desativar**. O estado
+marcado ou desmarcado continua sendo exposto pelo próprio controle ao leitor de
+tela. Pressione `Espaço` para alternar o botão em foco.
 **Ativar/Desativar mesa**, **Encerrar programa** e o estado do processamento
 permanecem disponíveis fora das guias. Os atalhos globais de efeitos e ajustes
 revelam automaticamente a guia correspondente.
