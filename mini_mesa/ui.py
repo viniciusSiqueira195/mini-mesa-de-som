@@ -498,28 +498,57 @@ class SoundboardPanel(wx.ScrolledWindow):
         )
         self._frame._play_feedback("page")
 
-    def _choose_file(self) -> str | None:
+    def _choose_files(self, *, multiple: bool = False) -> list[str]:
+        style = wx.FD_OPEN | wx.FD_FILE_MUST_EXIST
+        if multiple:
+            style |= wx.FD_MULTIPLE
         with wx.FileDialog(
             self, "Escolha um arquivo para o painel de efeitos",
             wildcard="Arquivos de áudio (*.wav;*.mp3;*.flac;*.ogg)|*.wav;*.mp3;*.flac;*.ogg",
-            style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST,
+            style=style,
         ) as dialog:
             if dialog.ShowModal() != wx.ID_OK:
-                return None
-            path = str(Path(dialog.GetPath()).resolve())
-        try:
-            validate_custom_audio(Path(path))
-        except (OSError, SoundEffectError) as exc:
-            self._frame._show_error(str(exc))
-            return None
-        return path
+                return []
+            selected = dialog.GetPaths() if multiple else [dialog.GetPath()]
+
+        paths: list[str] = []
+        seen: set[str] = set()
+        for selected_path in selected:
+            path = Path(selected_path).resolve()
+            key = str(path).casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            try:
+                validate_custom_audio(path)
+            except (OSError, SoundEffectError) as exc:
+                self._frame._show_error(str(exc))
+                return []
+            paths.append(str(path))
+        return paths
+
+    def _choose_file(self) -> str | None:
+        paths = self._choose_files()
+        return paths[0] if paths else None
 
     def _on_add(self, _event: wx.Event) -> None:
         if len(self._effects) >= 10:
             self._frame._show_error("Esta página já tem dez efeitos. Escolha outra página ou remova um efeito.")
             return
-        path = self._choose_file()
-        if path is not None:
+        paths = self._choose_files(multiple=True)
+        available = 10 - len(self._effects)
+        if len(paths) > available:
+            slot_word = "vaga" if available == 1 else "vagas"
+            self._frame._show_error(
+                f"Esta página tem espaço para apenas {available} {slot_word}, "
+                f"mas você selecionou {len(paths)} arquivos."
+            )
+            return
+        if not paths:
+            return
+
+        approved_paths: list[str] = []
+        for path in paths:
             preview = SoundPreviewDialog(self._frame, path, self._page)
             try:
                 if preview.ShowModal() != wx.ID_OK:
@@ -531,9 +560,18 @@ class SoundboardPanel(wx.ScrolledWindow):
                     except Exception:
                         pass
                 preview.Destroy()
-            effects = [*self._effects, PersonalSound(Path(path).stem, path, self._page)]
-            if self._commit_effects(effects, len(effects) - 1):
-                self._frame.SetStatusText(f"Efeito adicionado: {effects[-1].name}.")
+            approved_paths.append(path)
+
+        effects = [
+            *self._effects,
+            *(PersonalSound(Path(path).stem, path, self._page) for path in approved_paths),
+        ]
+        if self._commit_effects(effects, len(effects) - 1):
+            if len(approved_paths) == 1:
+                message = f"Efeito adicionado: {effects[-1].name}."
+            else:
+                message = f"{len(approved_paths)} efeitos adicionados."
+            self._frame.SetStatusText(message)
 
     def _on_rename(self, _event: wx.Event) -> None:
         index = self._selected_index()

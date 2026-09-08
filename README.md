@@ -294,11 +294,12 @@ seleciona a guia **Painel de efeitos** e leva o foco ao seletor de páginas.
    **Página 1**, **Página 2** e assim por diante. O foco permanece no seletor
    enquanto você escolhe.
 2. Pressione `Tab` para chegar ao botão **Adicionar efeitos, página 1** (o número
-   acompanha a página escolhida). Ative o botão e selecione um arquivo WAV, MP3,
-   FLAC ou OGG. Antes de adicionar, **Ouvir prévia** toca o arquivo somente no
-   dispositivo de retorno. A prévia funciona com a mesa desativada, sem abrir o
+   acompanha a página escolhida). Ative o botão e selecione um ou mais arquivos WAV,
+   MP3, FLAC ou OGG. Cada arquivo é conferido individualmente antes de ser adicionado;
+   cancelar qualquer prévia cancela todo o lote. **Ouvir prévia** toca o arquivo somente
+   no dispositivo de retorno. A prévia funciona com a mesa desativada, sem abrir o
    microfone. `F6` também adiciona diretamente à página atual.
-3. Após confirmar, o foco vai para o novo efeito. A lista anuncia somente o nome
+3. Após confirmar, o foco vai para os novos efeitos. A lista anuncia somente o nome
    e o atalho do som, sem ler o caminho inteiro do arquivo.
 4. Na lista, use as setas para escolher o efeito e abra seu menu com a tecla
    **Aplicações** ou `Shift+F10`. O botão direito sobre um efeito e o botão
