@@ -119,6 +119,8 @@ class UpdaterTests(unittest.TestCase):
                     "/SUPPRESSMSGBOXES",
                     "/NORESTART",
                     "/NOCANCEL",
+                    "/CLOSEAPPLICATIONS",
+                    "/FORCECLOSEAPPLICATIONS",
                     "/MERGETASKS=!vbcable",
                 ],
                 cwd=str(installer.parent.resolve()),

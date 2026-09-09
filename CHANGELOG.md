@@ -1,5 +1,16 @@
 # Histórico de versões
 
+## 1.2.1 — 2026-09-09
+
+- Corrige atualizações incrementais que podiam deixar de instalar o componente
+  nativo `Placasom.exe` e outros arquivos novos do aplicativo.
+- O atualizador agora solicita explicitamente o fechamento da Mini Mesa antes de
+  substituir os arquivos da instalação.
+- O instalador verifica a presença dos componentes essenciais antes de concluir e
+  abrir a nova versão.
+- Corrige a abertura da Mini Mesa ao final da instalação, inclusive quando a
+  instalação do driver solicita a reinicialização do Windows.
+
 ## 1.2.0 — 2026-09-09
 
 Esta versão adiciona a transmissão do áudio de outros programas junto com o

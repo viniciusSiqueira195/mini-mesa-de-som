@@ -33,6 +33,29 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertIsNone(re.search(r"Mini Mesa de Som Teste", ui_source))
         self.assertIsNone(re.search(r"Mini Mesa de Som Teste", package_source))
 
+    def test_installer_explicitly_installs_and_verifies_new_runtime_files(self) -> None:
+        installer = (_ROOT / "installer" / "MiniMesaDeSom.iss").read_text(
+            encoding="utf-8"
+        )
+
+        for filename in ("Placasom.exe", "CHANGELOG.md", "winsound.pyd"):
+            self.assertIn(f'{{#AppDistDir}}\\_internal\\{filename}', installer)
+            self.assertIn(f"{{app}}\\_internal\\{filename}", installer)
+
+    def test_installer_always_reopens_app_as_the_current_user(self) -> None:
+        installer = (_ROOT / "installer" / "MiniMesaDeSom.iss").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn(
+            'Filename: "{app}\\{#AppExeName}"; WorkingDir: "{app}";',
+            installer,
+        )
+        self.assertIn("Flags: nowait runascurrentuser", installer)
+        self.assertNotIn("postinstall skipifsilent", installer)
+        self.assertNotIn("skipifnotsilent", installer)
+        self.assertIn("{app}\\{#AppExeName}", installer)
+
 
 if __name__ == "__main__":
     unittest.main()

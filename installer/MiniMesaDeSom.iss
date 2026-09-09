@@ -1,5 +1,5 @@
 #define AppName "Mini Mesa de Som"
-#define AppVersion "1.2.0"
+#define AppVersion "1.2.1"
 #define AppPublisher "Vinicius Siqueira"
 #define AppURL "https://github.com/viniciusSiqueira195/mini-mesa-de-som"
 #define AppExeName "MiniMesaDeSom.exe"
@@ -15,7 +15,7 @@ AppPublisher={#AppPublisher}
 AppPublisherURL={#AppURL}
 AppSupportURL={#AppURL}
 AppUpdatesURL={#AppURL}
-VersionInfoVersion=1.2.0.0
+VersionInfoVersion=1.2.1.0
 VersionInfoCompany={#AppPublisher}
 VersionInfoDescription=Mesa de som virtual acessível com efeitos em tempo real
 VersionInfoProductName={#AppName}
@@ -32,6 +32,7 @@ SolidCompression=yes
 WizardStyle=modern
 UninstallDisplayIcon={app}\{#AppExeName}
 CloseApplications=yes
+CloseApplicationsFilter=MiniMesaDeSom.exe
 RestartApplications=no
 RestartIfNeededByRun=no
 
@@ -43,7 +44,10 @@ Name: "desktopicon"; Description: "Criar atalho na área de trabalho"; GroupDesc
 Name: "vbcable"; Description: "Instalar o VB-CABLE oficial (recomendado)"; GroupDescription: "Driver de áudio virtual:"; Flags: checkedonce
 
 [Files]
-Source: "{#AppDistDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#AppDistDir}\*"; DestDir: "{app}"; Excludes: "_internal\Placasom.exe,_internal\CHANGELOG.md,_internal\winsound.pyd"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#AppDistDir}\_internal\Placasom.exe"; DestDir: "{app}\_internal"; Flags: ignoreversion
+Source: "{#AppDistDir}\_internal\CHANGELOG.md"; DestDir: "{app}\_internal"; Flags: ignoreversion
+Source: "{#AppDistDir}\_internal\winsound.pyd"; DestDir: "{app}\_internal"; Flags: ignoreversion
 Source: "VB-CABLE-NOTICE.txt"; DestDir: "{app}\licenses"; Flags: ignoreversion
 Source: "AudioDeviceCmdlets-NOTICE.txt"; DestDir: "{app}\licenses"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
@@ -57,8 +61,7 @@ Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExeName}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#AppExeName}"; Description: "Abrir {#AppName}"; Flags: nowait postinstall skipifsilent
-Filename: "{app}\{#AppExeName}"; Flags: nowait skipifnotsilent
+Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; StatusMsg: "Abrindo {#AppName}..."; Flags: nowait runascurrentuser
 
 [Code]
 var
@@ -102,7 +105,17 @@ end;
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
+  begin
+    if not FileExists(ExpandConstant('{app}\{#AppExeName}')) then
+      RaiseException('O executável da Mini Mesa de Som não foi instalado.');
+    if not FileExists(ExpandConstant('{app}\_internal\Placasom.exe')) then
+      RaiseException('O componente nativo Placasom.exe não foi instalado.');
+    if not FileExists(ExpandConstant('{app}\_internal\CHANGELOG.md')) then
+      RaiseException('O arquivo de novidades não foi instalado.');
+    if not FileExists(ExpandConstant('{app}\_internal\winsound.pyd')) then
+      RaiseException('O componente de avisos sonoros não foi instalado.');
     InstallOptionalVBCable;
+  end;
 end;
 
 function NeedRestart(): Boolean;

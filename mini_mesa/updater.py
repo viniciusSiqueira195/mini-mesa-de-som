@@ -184,6 +184,8 @@ def launch_installer(installer_path: Path) -> None:
                 "/SUPPRESSMSGBOXES",
                 "/NORESTART",
                 "/NOCANCEL",
+                "/CLOSEAPPLICATIONS",
+                "/FORCECLOSEAPPLICATIONS",
                 "/MERGETASKS=!vbcable",
             ],
             cwd=str(installer.parent),
