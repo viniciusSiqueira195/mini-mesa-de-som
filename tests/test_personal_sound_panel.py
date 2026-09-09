@@ -53,6 +53,15 @@ class PersonalSoundPanelTests(unittest.TestCase):
         dialog.__exit__ = Mock(return_value=False)
         dialog.ShowModal.return_value = ui.wx.ID_OK if result is None else result
         dialog.GetPath.return_value = str(path or self.path)
+        dialog.GetPaths.return_value = [str(path or self.path)]
+        return patch.object(ui.wx, "FileDialog", return_value=dialog)
+
+    def multiple_file_dialog(self, paths, result=None):
+        dialog = Mock()
+        dialog.__enter__ = Mock(return_value=dialog)
+        dialog.__exit__ = Mock(return_value=False)
+        dialog.ShowModal.return_value = ui.wx.ID_OK if result is None else result
+        dialog.GetPaths.return_value = [str(path) for path in paths]
         return patch.object(ui.wx, "FileDialog", return_value=dialog)
 
     def add_sound(self):
@@ -70,6 +79,38 @@ class PersonalSoundPanelTests(unittest.TestCase):
         ))
         self.assertTrue(self.panel.play_button.IsEnabled())
         self.engine.play_sound.assert_not_called()
+
+    def test_add_can_import_multiple_files_and_previews_each_one(self):
+        second = self.root / "Segunda vinheta.wav"
+        sf.write(second, np.full(240, 0.5), 24_000)
+        with self.multiple_file_dialog([self.path, second]):
+            self.panel._on_add(None)
+        self.assertEqual(self.store.load().personal_sounds, (
+            PersonalSound("Minha vinheta", str(self.path)),
+            PersonalSound("Segunda vinheta", str(second)),
+        ))
+        self.assertEqual(ui.SoundPreviewDialog.call_count, 2)
+
+    def test_add_rejects_a_selection_larger_than_remaining_page_capacity(self):
+        effects = [PersonalSound(f"Som {i}", str(self.path)) for i in range(9)]
+        self.panel._commit_effects(effects, 8)
+        extra = self.root / "Extra.wav"
+        sf.write(extra, np.full(240, 0.5), 24_000)
+        with self.multiple_file_dialog([self.path, extra]), patch.object(self.frame, "_show_error") as error:
+            self.panel._on_add(None)
+        error.assert_called_once_with(
+            "Esta página tem espaço para apenas 1 vaga, mas você selecionou 2 arquivos."
+        )
+        self.assertEqual(self.store.load().personal_sounds, tuple(effects))
+        ui.SoundPreviewDialog.assert_not_called()
+
+    def test_canceling_one_preview_does_not_save_a_partial_batch(self):
+        second = self.root / "Segunda vinheta.wav"
+        sf.write(second, np.full(240, 0.5), 24_000)
+        ui.SoundPreviewDialog.return_value.ShowModal.side_effect = [ui.wx.ID_OK, ui.wx.ID_CANCEL]
+        with self.multiple_file_dialog([self.path, second]):
+            self.panel._on_add(None)
+        self.assertEqual(self.store.load().personal_sounds, ())
 
     def test_effects_survive_other_preferences_and_reopening(self):
         self.add_sound()

@@ -94,7 +94,8 @@ class NotebookTests(unittest.TestCase):
         self.assertIn("Desativar", button.GetLabel())
         button.SetValue(False)
         self.assertIn("Ativar", button.GetLabel())
-        self.assertIn("Desligado", button.GetName())
+        self.assertNotIn("Ligado", button.GetLabel())
+        self.assertNotIn("Desligado", button.GetName())
         self.assertEqual(self.engine.mock_calls, [])
 
     def test_native_toggle_event_updates_state_and_audio(self) -> None:

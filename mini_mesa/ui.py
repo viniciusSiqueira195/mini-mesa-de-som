@@ -168,15 +168,22 @@ _AMBIENCES = (
 )
 
 
-class _NamedSliderAccessible(wx.Accessible):
-    """Expose a stable MSAA name for a native Windows slider and its thumb."""
+class _NamedControlAccessible(wx.Accessible):
+    """Expose a stable MSAA name for a native Windows control."""
 
-    def __init__(self, slider: wx.Slider, name: str) -> None:
-        super().__init__(slider)
+    def __init__(self, control: wx.Window, name: str) -> None:
+        super().__init__(control)
         self._name = name
 
     def GetName(self, _child_id: int) -> tuple[wx.AccStatus, str]:
         return wx.ACC_OK, self._name
+
+    def update_name(self, name: str) -> None:
+        self._name = name
+
+
+class _NamedSliderAccessible(_NamedControlAccessible):
+    """Expose a stable MSAA name for a native Windows slider and its thumb."""
 
 
 def _set_slider_accessible_name(slider: wx.Slider, name: str) -> wx.Accessible:
@@ -187,6 +194,64 @@ def _set_slider_accessible_name(slider: wx.Slider, name: str) -> wx.Accessible:
     accessible = _NamedSliderAccessible(slider, name)
     slider.SetAccessible(accessible)
     return accessible
+
+
+def _set_control_accessible_name(
+    control: wx.Window, name: str
+) -> _NamedControlAccessible:
+    """Attach a real MSAA name to controls whose native wrapper has none."""
+
+    control.SetName(name)
+    accessible = _NamedControlAccessible(control, name)
+    control.SetAccessible(accessible)
+    return accessible
+
+
+def _set_spin_accessible_name(spin: wx.SpinCtrl, name: str) -> None:
+    """Give a native spin control both its wx label and accessible name."""
+
+    spin.SetName(name)
+    spin.SetLabel(name)
+
+
+def _set_choice_accessible_name(choice: wx.Choice, name: str) -> None:
+    """Set a Choice label before selection so wx keeps its selected item."""
+
+    choice.SetLabel(name)
+    choice.SetName(name)
+
+
+def _set_button_accessible_name(button: wx.Button, name: str | None = None) -> None:
+    """Keep a button's native accessible name meaningful instead of ``button``."""
+
+    button.SetName(name or button.GetLabel().replace("&", ""))
+
+
+def _set_search_accessible_name(
+    search: wx.SearchCtrl, name: str
+) -> tuple[_NamedControlAccessible, ...]:
+    """Name the composite search control and the native children receiving focus."""
+
+    search.SetName(name)
+    search.SetLabel(name)
+    accessibilities = [_set_control_accessible_name(search, name)]
+    auxiliary_children = []
+    for child in search.GetChildren():
+        if isinstance(child, wx.TextCtrl):
+            child.SetName(name)
+            accessibilities.append(_set_control_accessible_name(child, name))
+        else:
+            auxiliary_children.append(child)
+    if auxiliary_children:
+        accessibilities.append(
+            _set_control_accessible_name(auxiliary_children[0], "Buscar efeito")
+        )
+    if len(auxiliary_children) > 1:
+        # SearchCtrl creates an unlabeled clear button when it is enabled.
+        accessibilities.append(
+            _set_control_accessible_name(auxiliary_children[-1], "Limpar busca")
+        )
+    return tuple(accessibilities)
 
 
 class SystemTrayIcon(wx.adv.TaskBarIcon):
@@ -246,8 +311,7 @@ class EffectToggleButton(wx.ToggleButton):
     def _refresh_label(self) -> None:
         enabled = self.GetValue()
         action = "Desativar" if enabled else "Ativar"
-        state = "Ligado" if enabled else "Desligado"
-        self.SetLabel(f"{action} {self._effect_label} ({state})")
+        self.SetLabel(f"{action} {self._effect_label}")
         self.SetName(self.GetLabel().replace("&", ""))
 
     def SetValue(self, value: bool) -> None:
@@ -296,12 +360,13 @@ class SoundboardPanel(wx.ScrolledWindow):
 
         root.Add(wx.StaticText(self, label="Página de efeitos:"), 0, wx.LEFT | wx.RIGHT, 12)
         self.page_choice = wx.Choice(self, choices=self._page_names)
-        self.page_choice.SetName("Página de efeitos")
+        _set_choice_accessible_name(self.page_choice, "Página de efeitos")
         self.page_choice.SetSelection(self._page)
         self.page_choice.Bind(wx.EVT_CHOICE, self._on_page_changed)
         root.Add(self.page_choice, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
 
         rename_page = wx.Button(self, label="Renomear página...")
+        _set_button_accessible_name(rename_page, "Renomear página")
         rename_page.Bind(wx.EVT_BUTTON, self._on_rename_page)
         root.Add(rename_page, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
 
@@ -312,8 +377,10 @@ class SoundboardPanel(wx.ScrolledWindow):
 
         root.Add(wx.StaticText(self, label="&Buscar efeito nesta página:"), 0, wx.LEFT | wx.RIGHT, 12)
         self.search = wx.SearchCtrl(self, style=wx.TE_PROCESS_ENTER)
-        self.search.SetName("Buscar efeito na página atual")
         self.search.ShowCancelButton(True)
+        self._search_accessibilities = _set_search_accessible_name(
+            self.search, "Buscar efeito na página atual"
+        )
         self.search.Bind(wx.EVT_TEXT, self._on_search)
         root.Add(self.search, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
 
@@ -324,7 +391,11 @@ class SoundboardPanel(wx.ScrolledWindow):
                 for index, effect in enumerate(self._effects)
             ],
         )
+        self.effect_list.SetLabel("Lista de efeitos sonoros")
         self.effect_list.SetName("Lista de efeitos sonoros")
+        self._effect_list_accessible = _set_control_accessible_name(
+            self.effect_list, "Lista de efeitos sonoros"
+        )
         if self._effects:
             self.effect_list.SetSelection(0)
         self.effect_list.Bind(wx.EVT_LISTBOX_DCLICK, self._on_play)
@@ -333,15 +404,18 @@ class SoundboardPanel(wx.ScrolledWindow):
         root.Add(self.effect_list, 1, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
 
         self.actions_button = wx.Button(self, label="Ações do efeito...")
+        _set_button_accessible_name(self.actions_button, "Ações do efeito")
         self.actions_button.Bind(wx.EVT_BUTTON, self._show_effect_menu)
         root.Add(self.actions_button, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
 
         actions = wx.BoxSizer(wx.HORIZONTAL)
         play_button = wx.Button(self, label="&Reproduzir")
         self.play_button = play_button
+        _set_button_accessible_name(play_button, "Reproduzir efeito selecionado")
         play_button.Bind(wx.EVT_BUTTON, self._on_play)
         actions.Add(play_button, 1, wx.RIGHT | wx.EXPAND, 5)
         stop_button = wx.Button(self, label="&Parar todos")
+        _set_button_accessible_name(stop_button, "Parar todos os efeitos")
         stop_button.Bind(wx.EVT_BUTTON, self._on_stop)
         actions.Add(stop_button, 1, wx.LEFT | wx.RIGHT | wx.EXPAND, 5)
         root.Add(actions, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
@@ -356,7 +430,9 @@ class SoundboardPanel(wx.ScrolledWindow):
             maxValue=100,
             style=wx.SL_HORIZONTAL | wx.SL_LABELS,
         )
-        self.volume.SetName("Volume dos efeitos sonoros")
+        self._volume_accessible = _set_slider_accessible_name(
+            self.volume, "Volume dos efeitos sonoros"
+        )
         self.volume.Bind(wx.EVT_SLIDER, self._on_settings_changed)
         root.Add(self.volume, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
 
@@ -376,7 +452,9 @@ class SoundboardPanel(wx.ScrolledWindow):
             maxValue=100,
             style=wx.SL_HORIZONTAL | wx.SL_LABELS,
         )
-        self.ducking_amount.SetName("Intensidade do ducking dos efeitos")
+        self._ducking_amount_accessible = _set_slider_accessible_name(
+            self.ducking_amount, "Intensidade do ducking dos efeitos"
+        )
         self.ducking_amount.Enable(settings.ducking_enabled)
         self.ducking_amount.Bind(wx.EVT_SLIDER, self._on_settings_changed)
         root.Add(
@@ -416,12 +494,14 @@ class SoundboardPanel(wx.ScrolledWindow):
         self.add_button.SetLabel(f"&Adicionar efeitos, {page_name}... (F6)")
         self.add_button.SetName(f"Adicionar efeitos, {page_name}")
         self.add_button.Enable(len(self._effects) < 10)
-        self.effect_list.SetName(
+        list_name = (
             f"{page_name}. Lista de efeitos sonoros"
             + ("" if self._visible_effects else (
                 " sem resultados." if query else " vazia. Pressione F6 para adicionar."
             ))
         )
+        self.effect_list.SetName(list_name)
+        self._effect_list_accessible.update_name(list_name)
 
     def _commit_effects(self, effects: list[PersonalSound], selection: int) -> bool:
         all_effects = [effect for effect in self._all_effects if effect.page != self._page]
@@ -498,28 +578,57 @@ class SoundboardPanel(wx.ScrolledWindow):
         )
         self._frame._play_feedback("page")
 
-    def _choose_file(self) -> str | None:
+    def _choose_files(self, *, multiple: bool = False) -> list[str]:
+        style = wx.FD_OPEN | wx.FD_FILE_MUST_EXIST
+        if multiple:
+            style |= wx.FD_MULTIPLE
         with wx.FileDialog(
             self, "Escolha um arquivo para o painel de efeitos",
             wildcard="Arquivos de áudio (*.wav;*.mp3;*.flac;*.ogg)|*.wav;*.mp3;*.flac;*.ogg",
-            style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST,
+            style=style,
         ) as dialog:
             if dialog.ShowModal() != wx.ID_OK:
-                return None
-            path = str(Path(dialog.GetPath()).resolve())
-        try:
-            validate_custom_audio(Path(path))
-        except (OSError, SoundEffectError) as exc:
-            self._frame._show_error(str(exc))
-            return None
-        return path
+                return []
+            selected = dialog.GetPaths() if multiple else [dialog.GetPath()]
+
+        paths: list[str] = []
+        seen: set[str] = set()
+        for selected_path in selected:
+            path = Path(selected_path).resolve()
+            key = str(path).casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            try:
+                validate_custom_audio(path)
+            except (OSError, SoundEffectError) as exc:
+                self._frame._show_error(str(exc))
+                return []
+            paths.append(str(path))
+        return paths
+
+    def _choose_file(self) -> str | None:
+        paths = self._choose_files()
+        return paths[0] if paths else None
 
     def _on_add(self, _event: wx.Event) -> None:
         if len(self._effects) >= 10:
             self._frame._show_error("Esta página já tem dez efeitos. Escolha outra página ou remova um efeito.")
             return
-        path = self._choose_file()
-        if path is not None:
+        paths = self._choose_files(multiple=True)
+        available = 10 - len(self._effects)
+        if len(paths) > available:
+            slot_word = "vaga" if available == 1 else "vagas"
+            self._frame._show_error(
+                f"Esta página tem espaço para apenas {available} {slot_word}, "
+                f"mas você selecionou {len(paths)} arquivos."
+            )
+            return
+        if not paths:
+            return
+
+        approved_paths: list[str] = []
+        for path in paths:
             preview = SoundPreviewDialog(self._frame, path, self._page)
             try:
                 if preview.ShowModal() != wx.ID_OK:
@@ -531,9 +640,18 @@ class SoundboardPanel(wx.ScrolledWindow):
                     except Exception:
                         pass
                 preview.Destroy()
-            effects = [*self._effects, PersonalSound(Path(path).stem, path, self._page)]
-            if self._commit_effects(effects, len(effects) - 1):
-                self._frame.SetStatusText(f"Efeito adicionado: {effects[-1].name}.")
+            approved_paths.append(path)
+
+        effects = [
+            *self._effects,
+            *(PersonalSound(Path(path).stem, path, self._page) for path in approved_paths),
+        ]
+        if self._commit_effects(effects, len(effects) - 1):
+            if len(approved_paths) == 1:
+                message = f"Efeito adicionado: {effects[-1].name}."
+            else:
+                message = f"{len(approved_paths)} efeitos adicionados."
+            self._frame.SetStatusText(message)
 
     def _on_rename(self, _event: wx.Event) -> None:
         index = self._selected_index()
@@ -718,6 +836,7 @@ class ReleaseNotesDialog(wx.Dialog):
         self.news_text.SetInsertionPoint(0)
         root.Add(self.news_text, 1, wx.ALL | wx.EXPAND, 12)
         close_button = wx.Button(self, wx.ID_OK, "&Fechar novidades")
+        _set_button_accessible_name(close_button, "Fechar novidades")
         close_button.SetDefault()
         self.SetEscapeId(wx.ID_OK)
         root.Add(close_button, 0, wx.ALL | wx.ALIGN_RIGHT, 12)
@@ -784,20 +903,24 @@ class HelpDialog(wx.Dialog):
 
         actions = wx.BoxSizer(wx.HORIZONTAL)
         self.mode_button = wx.Button(self, label="Usar modo de &texto contínuo")
+        _set_button_accessible_name(self.mode_button, "Usar modo de texto contínuo")
         self.mode_button.Bind(wx.EVT_BUTTON, self._on_toggle_reading_mode)
         self.mode_button.Enable(self.web_help is not None)
         actions.Add(self.mode_button, 1, wx.RIGHT | wx.EXPAND, 5)
         project_button = wx.Button(self, label="Abrir &projeto no GitHub")
+        _set_button_accessible_name(project_button, "Abrir projeto no GitHub")
         project_button.Bind(
             wx.EVT_BUTTON, lambda _event: wx.LaunchDefaultBrowser(_PROJECT_URL)
         )
         actions.Add(project_button, 1, wx.RIGHT | wx.EXPAND, 5)
         paulo_button = wx.Button(self, label="Abrir GitHub de P&aulo Santesso")
+        _set_button_accessible_name(paulo_button, "Abrir GitHub de Paulo Santesso")
         paulo_button.Bind(
             wx.EVT_BUTTON, lambda _event: wx.LaunchDefaultBrowser(_PAULO_URL)
         )
         actions.Add(paulo_button, 1, wx.LEFT | wx.RIGHT | wx.EXPAND, 5)
         close_button = wx.Button(self, wx.ID_CANCEL, "&Fechar")
+        _set_button_accessible_name(close_button, "Fechar")
         actions.Add(close_button, 1, wx.LEFT | wx.EXPAND, 5)
         root.Add(actions, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 10)
         self.SetSizer(root)
@@ -818,12 +941,18 @@ class HelpDialog(wx.Dialog):
                 "os números de 1 a 6 para escolher o nível e as setas para ler."
             )
             self.mode_button.SetLabel("Usar modo de &texto contínuo")
+            _set_button_accessible_name(
+                self.mode_button, "Usar modo de texto contínuo"
+            )
             self.web_help.SetFocus()
         else:
             self.instructions.SetLabel(
                 "Modo texto contínuo. Use as setas, Page Up, Page Down, Home e End."
             )
             self.mode_button.SetLabel("Usar navegação por &cabeçalhos")
+            _set_button_accessible_name(
+                self.mode_button, "Usar navegação por cabeçalhos"
+            )
             self.help_text.SetFocus()
         self.Layout()
 
@@ -854,9 +983,12 @@ class SoundPreviewDialog(wx.Dialog):
         preview.Bind(wx.EVT_BUTTON, lambda _event: parent.preview_personal_sound(self._sound))
         buttons.Add(preview, 1, wx.RIGHT, 6)
         add = wx.Button(self, wx.ID_OK, "&Adicionar")
+        _set_button_accessible_name(add, "Adicionar")
         add.SetDefault()
         buttons.Add(add, 1, wx.RIGHT, 6)
-        buttons.Add(wx.Button(self, wx.ID_CANCEL, "&Cancelar"), 1)
+        cancel = wx.Button(self, wx.ID_CANCEL, "&Cancelar")
+        _set_button_accessible_name(cancel, "Cancelar")
+        buttons.Add(cancel, 1)
         root.Add(buttons, 0, wx.ALL | wx.EXPAND, 12)
         self.SetSizerAndFit(root)
         self.SetEscapeId(wx.ID_CANCEL)
@@ -874,9 +1006,12 @@ class DiagnosticDialog(wx.Dialog):
         root.Add(self.report, 1, wx.ALL | wx.EXPAND, 12)
         buttons = wx.BoxSizer(wx.HORIZONTAL)
         copy_button = wx.Button(self, label="&Copiar diagnóstico")
+        _set_button_accessible_name(copy_button, "Copiar diagnóstico")
         copy_button.Bind(wx.EVT_BUTTON, self._on_copy)
         buttons.Add(copy_button, 1, wx.RIGHT, 6)
-        buttons.Add(wx.Button(self, wx.ID_OK, "&Fechar"), 1)
+        close_button = wx.Button(self, wx.ID_OK, "&Fechar")
+        _set_button_accessible_name(close_button, "Fechar")
+        buttons.Add(close_button, 1)
         root.Add(buttons, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
         self.SetSizer(root)
         self.report.SetFocus()
@@ -907,11 +1042,17 @@ class HotkeySettingsDialog(wx.Dialog):
         self.effect_modifier = wx.Choice(
             self, choices=[modifier_label(value) for value in self._EFFECT_VALUES]
         )
+        _set_choice_accessible_name(
+            self.effect_modifier, "Modificador para tocar efeitos"
+        )
         self.effect_modifier.SetSelection(self._EFFECT_VALUES.index(preferences.global_effect_modifier))
         root.Add(self.effect_modifier, 0, wx.ALL | wx.EXPAND, 12)
         root.Add(wx.StaticText(self, label="Modificador para trocar &páginas:"), 0, wx.LEFT | wx.RIGHT, 12)
         self.page_modifier = wx.Choice(
             self, choices=[modifier_label(value) for value in self._PAGE_VALUES]
+        )
+        _set_choice_accessible_name(
+            self.page_modifier, "Modificador para trocar páginas"
         )
         self.page_modifier.SetSelection(self._PAGE_VALUES.index(preferences.global_page_modifier))
         root.Add(self.page_modifier, 0, wx.ALL | wx.EXPAND, 12)
@@ -925,6 +1066,12 @@ class HotkeySettingsDialog(wx.Dialog):
             12,
         )
         buttons = self.CreateButtonSizer(wx.OK | wx.CANCEL)
+        ok_button = self.FindWindow(wx.ID_OK)
+        if ok_button is not None:
+            _set_button_accessible_name(ok_button, "OK")
+        cancel_button = self.FindWindow(wx.ID_CANCEL)
+        if cancel_button is not None:
+            _set_button_accessible_name(cancel_button, "Cancelar")
         root.Add(buttons, 0, wx.ALL | wx.EXPAND, 12)
         self.SetSizerAndFit(root)
 
@@ -975,6 +1122,7 @@ class MainFrame(wx.Frame):
 
         panel = wx.Panel(self)
         self.notebook = wx.Notebook(panel, style=wx.NB_TOP | wx.NB_MULTILINE)
+        self.notebook.SetLabel("Guias da mesa de som")
         self.notebook.SetName("Guias da mesa de som")
         self.notebook.SetMinSize((1, 1))
         pages = []
@@ -1010,14 +1158,16 @@ class MainFrame(wx.Frame):
 
         input_label = wx.StaticText(box_devices, label="&Microfone de entrada:")
         self.input_choice = wx.Choice(box_devices)
-        self.input_choice.SetName("Microfone de entrada")
+        _set_choice_accessible_name(self.input_choice, "Microfone de entrada")
         self.input_choice.Bind(wx.EVT_CHOICE, self._on_preference_changed)
         devices.Add(input_label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
         devices.Add(self.input_choice, 0, wx.ALL | wx.EXPAND, 8)
 
         output_label = wx.StaticText(box_devices, label="&Saída virtual:")
         self.output_choice = wx.Choice(box_devices)
-        self.output_choice.SetName("Saída virtual para Discord ou TeamTalk")
+        _set_choice_accessible_name(
+            self.output_choice, "Saída virtual para Discord ou TeamTalk"
+        )
         self.output_choice.Bind(wx.EVT_CHOICE, self._on_preference_changed)
         devices.Add(output_label, 0, wx.LEFT | wx.RIGHT, 8)
         devices.Add(self.output_choice, 0, wx.ALL | wx.EXPAND, 8)
@@ -1030,13 +1180,17 @@ class MainFrame(wx.Frame):
 
         monitor_label = wx.StaticText(box_devices, label="Dispositivo de re&torno:")
         self.monitor_choice = wx.Choice(box_devices)
-        self.monitor_choice.SetName("Dispositivo para ouvir os efeitos e o retorno da voz")
+        _set_choice_accessible_name(
+            self.monitor_choice,
+            "Dispositivo para ouvir os efeitos e o retorno da voz",
+        )
         self.monitor_choice.Enable()
         self.monitor_choice.Bind(wx.EVT_CHOICE, self._on_preference_changed)
         devices.Add(monitor_label, 0, wx.LEFT | wx.RIGHT, 8)
         devices.Add(self.monitor_choice, 0, wx.ALL | wx.EXPAND, 8)
 
         self.refresh_button = wx.Button(box_devices, label="Atualizar dispositivos (F5)")
+        _set_button_accessible_name(self.refresh_button, "Atualizar dispositivos")
         self.refresh_button.Bind(wx.EVT_BUTTON, self._on_refresh)
         devices.Add(self.refresh_button, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 8)
         devices_root.Add(devices, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
@@ -1055,7 +1209,9 @@ class MainFrame(wx.Frame):
             maxValue=100,
             style=wx.SL_HORIZONTAL | wx.SL_LABELS,
         )
-        self.reverb_level.SetName("Nível de reverb")
+        self._reverb_level_accessible = _set_slider_accessible_name(
+            self.reverb_level, "Nível de reverb"
+        )
         self.reverb_level.Enable(self.preferences.reverb_enabled)
         self.reverb_level.Bind(wx.EVT_SLIDER, self._on_settings_changed)
         effect.Add(self.reverb_checkbox, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
@@ -1079,7 +1235,9 @@ class MainFrame(wx.Frame):
             box_voice,
             choices=[label for _value, label, _pitch in _VOICE_PRESETS],
         )
-        self.voice_preset_choice.SetName("Preset de modulação de voz")
+        _set_choice_accessible_name(
+            self.voice_preset_choice, "Preset de modulação de voz"
+        )
         self.voice_preset_choice.Enable(self.preferences.voice_enabled)
         self.voice_preset_choice.Bind(wx.EVT_CHOICE, self._on_voice_preset_selected)
 
@@ -1093,7 +1251,9 @@ class MainFrame(wx.Frame):
             maxValue=12,
             style=wx.SL_HORIZONTAL | wx.SL_LABELS,
         )
-        self.voice_pitch.SetName("Ajuste de tom da voz em semitons")
+        self._voice_pitch_accessible = _set_slider_accessible_name(
+            self.voice_pitch, "Ajuste de tom da voz em semitons"
+        )
         self.voice_pitch.Enable(self.preferences.voice_enabled)
         self.voice_pitch.Bind(wx.EVT_SLIDER, self._on_voice_changed)
 
@@ -1126,7 +1286,9 @@ class MainFrame(wx.Frame):
             box_creative,
             choices=[label for _value, label in _STYLE_PRESETS],
         )
-        self.creative_choice.SetName("Estilo de voz especial")
+        _set_choice_accessible_name(
+            self.creative_choice, "Estilo de voz especial"
+        )
         self.creative_choice.SetSelection(
             next(
                 (i for i, item in enumerate(_STYLE_PRESETS) if item[0] == self.preferences.creative_effect_preset),
@@ -1140,6 +1302,7 @@ class MainFrame(wx.Frame):
         self.modulation_choice = wx.Choice(
             box_creative, choices=[label for _value, label in _MODULATIONS]
         )
+        _set_choice_accessible_name(self.modulation_choice, "Modulação")
         self.modulation_choice.SetSelection(
             next(
                 (i for i, item in enumerate(_MODULATIONS) if item[0] == self.preferences.modulation_effect),
@@ -1153,6 +1316,7 @@ class MainFrame(wx.Frame):
         self.ambience_choice = wx.Choice(
             box_creative, choices=[label for _value, label in _AMBIENCES]
         )
+        _set_choice_accessible_name(self.ambience_choice, "Ambiente")
         self.ambience_choice.SetSelection(
             next(
                 (i for i, item in enumerate(_AMBIENCES) if item[0] == self.preferences.ambience_preset),
@@ -1228,7 +1392,9 @@ class MainFrame(wx.Frame):
             maxValue=100,
             style=wx.SL_HORIZONTAL | wx.SL_LABELS,
         )
-        self.delay_level.SetName("Nível de eco")
+        self._delay_level_accessible = _set_slider_accessible_name(
+            self.delay_level, "Nível de eco"
+        )
         self.delay_level.Enable(self.preferences.delay_enabled)
         self.delay_level.Bind(wx.EVT_SLIDER, self._on_creative_changed)
 
@@ -1406,7 +1572,7 @@ class MainFrame(wx.Frame):
             control = wx.SpinCtrl(
                 box_spatial, min=-100, max=100, initial=value
             )
-            control.SetName(label.replace("&", "").rstrip(":"))
+            _set_spin_accessible_name(control, label.replace("&", "").rstrip(":"))
             setattr(self, attribute, control)
             coordinates.Add(control, 1, wx.EXPAND)
         spatial.Add(coordinates, 0, wx.ALL | wx.EXPAND, 8)
@@ -1432,7 +1598,9 @@ class MainFrame(wx.Frame):
             max=100,
             initial=self.preferences.spatial_speed,
         )
-        self.spatial_speed.SetName("Velocidade do movimento espacial automático")
+        _set_spin_accessible_name(
+            self.spatial_speed, "Velocidade do movimento espacial automático"
+        )
         speed_row.Add(self.spatial_speed, 1, wx.EXPAND)
         spatial.Add(speed_row, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 8)
 
@@ -1455,12 +1623,13 @@ class MainFrame(wx.Frame):
 
         actions = wx.BoxSizer(wx.HORIZONTAL)
         self.toggle_button = wx.Button(panel, label="&Ativar mesa")
+        _set_button_accessible_name(self.toggle_button, "Ativar mesa")
         self.toggle_button.SetDefault()
         self.toggle_button.Bind(wx.EVT_BUTTON, self._on_toggle)
         actions.Add(self.toggle_button, 1, wx.RIGHT | wx.EXPAND, 6)
 
         self.exit_button = wx.Button(panel, label="En&cerrar programa")
-        self.exit_button.SetName("Encerrar a Mini Mesa de Som")
+        _set_button_accessible_name(self.exit_button, "Encerrar a Mini Mesa de Som")
         self.exit_button.Bind(wx.EVT_BUTTON, self._on_exit)
         actions.Add(self.exit_button, 1, wx.LEFT | wx.EXPAND, 6)
         root.Add(actions, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
@@ -2423,7 +2592,7 @@ class MainFrame(wx.Frame):
         self.preferences_store.save(preferences)
         self._apply_global_hotkeys()
         self._set_routing_controls_enabled(True)
-        self.toggle_button.SetLabel("&Ativar mesa")
+        self._set_toggle_button_label("&Ativar mesa")
         self.status.ChangeValue("Desativado. Perfil ou backup aplicado.")
 
     def _current_pro_audio_settings(self) -> ProAudioSettings:
@@ -2825,7 +2994,7 @@ class MainFrame(wx.Frame):
             except Exception as restore_error:
                 self._save_preferences()
                 self._set_routing_controls_enabled(True)
-                self.toggle_button.SetLabel("&Ativar mesa")
+                self._set_toggle_button_label("&Ativar mesa")
                 self.status.ChangeValue("Desativado após falha ao atualizar efeitos.")
                 self._show_error(
                     "Não foi possível alterar a redução de ruído nem restaurar "
@@ -2838,7 +3007,7 @@ class MainFrame(wx.Frame):
 
             self._save_preferences()
             self._set_routing_controls_enabled(False)
-            self.toggle_button.SetLabel("Des&ativar mesa")
+            self._set_toggle_button_label("Des&ativar mesa")
             self._show_running_state()
             self._show_error(
                 "Não foi possível alterar a redução de ruído. "
@@ -2850,7 +3019,7 @@ class MainFrame(wx.Frame):
 
         self._save_preferences()
         self._set_routing_controls_enabled(False)
-        self.toggle_button.SetLabel("Des&ativar mesa")
+        self._set_toggle_button_label("Des&ativar mesa")
         self._show_running_state()
         event.Skip()
 
@@ -2888,6 +3057,10 @@ class MainFrame(wx.Frame):
         for control in (self.spatial_x, self.spatial_y, self.spatial_z):
             control.Enable(enabled and not automatic)
 
+    def _set_toggle_button_label(self, label: str) -> None:
+        self.toggle_button.SetLabel(label)
+        _set_button_accessible_name(self.toggle_button)
+
     def _on_toggle(self, _event: wx.Event) -> None:
         if self.engine.is_running:
             try:
@@ -2896,7 +3069,7 @@ class MainFrame(wx.Frame):
                 self._show_error(f"Não foi possível desativar a mesa.\n\n{exc}")
                 return
             self._set_routing_controls_enabled(True)
-            self.toggle_button.SetLabel("&Ativar mesa")
+            self._set_toggle_button_label("&Ativar mesa")
             self.status.ChangeValue("Desativado.")
             self.SetStatusText("Mesa desativada.")
             self._play_feedback("stop")
@@ -2910,7 +3083,7 @@ class MainFrame(wx.Frame):
 
         self._save_preferences()
         self._set_routing_controls_enabled(False)
-        self.toggle_button.SetLabel("Des&ativar mesa")
+        self._set_toggle_button_label("Des&ativar mesa")
         self._show_running_state()
         self._play_feedback("start")
 
@@ -2972,7 +3145,7 @@ class MainFrame(wx.Frame):
         if not self.IsShown() or self.IsIconized():
             self.restore_from_tray()
         self._set_routing_controls_enabled(True)
-        self.toggle_button.SetLabel("&Ativar mesa")
+        self._set_toggle_button_label("&Ativar mesa")
         self._refresh_devices()
         self.status.ChangeValue("Desativado após uma falha no dispositivo.")
         self.SetStatusText(

@@ -106,3 +106,80 @@ class AccessibilityFeatureTests(unittest.TestCase):
             self.assertEqual(dialog.report.GetName(), "Relatório de diagnóstico")
         finally:
             dialog.Destroy()
+
+    def test_native_controls_expose_their_own_accessible_labels(self):
+        soundboard = self.frame.soundboard_panel
+
+        def assert_msaa_name(control, expected):
+            accessible = control.GetAccessible()
+            self.assertIsNotNone(accessible)
+            self.assertEqual(accessible.GetName(0), (ui.wx.ACC_OK, expected))
+
+        self.assertEqual(soundboard.search.GetLabel(), "Buscar efeito na página atual")
+        self.assertEqual(soundboard.search.GetName(), "Buscar efeito na página atual")
+        assert_msaa_name(soundboard.search, "Buscar efeito na página atual")
+        search_children = soundboard.search.GetChildren()
+        search_text = next(
+            child for child in search_children if isinstance(child, ui.wx.TextCtrl)
+        )
+        self.assertEqual(search_text.GetName(), "Buscar efeito na página atual")
+        assert_msaa_name(search_text, "Buscar efeito na página atual")
+        auxiliary_names = {
+            child.GetName()
+            for child in search_children
+            if not isinstance(child, ui.wx.TextCtrl)
+        }
+        self.assertIn("Buscar efeito", auxiliary_names)
+        self.assertIn("Limpar busca", auxiliary_names)
+        for child in search_children:
+            if not isinstance(child, ui.wx.TextCtrl):
+                assert_msaa_name(child, child.GetName())
+
+        choice_labels = (
+            (self.frame.input_choice, "Microfone de entrada"),
+            (self.frame.output_choice, "Saída virtual para Discord ou TeamTalk"),
+            (
+                self.frame.monitor_choice,
+                "Dispositivo para ouvir os efeitos e o retorno da voz",
+            ),
+            (self.frame.voice_preset_choice, "Preset de modulação de voz"),
+            (self.frame.creative_choice, "Estilo de voz especial"),
+            (self.frame.modulation_choice, "Modulação"),
+            (self.frame.ambience_choice, "Ambiente"),
+        )
+        for control, expected in choice_labels:
+            with self.subTest(control=expected):
+                self.assertEqual(control.GetLabel(), expected)
+                self.assertEqual(control.GetName(), expected)
+        self.assertEqual(self.frame.notebook.GetLabel(), "Guias da mesa de som")
+        self.assertEqual(
+            soundboard.effect_list.GetLabel(), "Lista de efeitos sonoros"
+        )
+        assert_msaa_name(soundboard.effect_list, soundboard.effect_list.GetName())
+
+        dialog = ui.HotkeySettingsDialog(self.frame, self.store.load())
+        try:
+            self.assertEqual(
+                dialog.effect_modifier.GetName(), "Modificador para tocar efeitos"
+            )
+            self.assertEqual(
+                dialog.page_modifier.GetName(), "Modificador para trocar páginas"
+            )
+        finally:
+            dialog.Destroy()
+
+        labeled_ranges = (
+            (self.frame.reverb_level, "Nível de reverb"),
+            (self.frame.voice_pitch, "Ajuste de tom da voz em semitons"),
+            (self.frame.delay_level, "Nível de eco"),
+            (soundboard.volume, "Volume dos efeitos sonoros"),
+            (soundboard.ducking_amount, "Intensidade do ducking dos efeitos"),
+            (self.frame.spatial_x, "X, esquerda menos 100 e direita mais 100"),
+            (self.frame.spatial_y, "Y, baixo menos 100 e cima mais 100"),
+            (self.frame.spatial_z, "Z, trás menos 100 e frente mais 100"),
+            (self.frame.spatial_speed, "Velocidade do movimento espacial automático"),
+        )
+        for control, expected in labeled_ranges:
+            with self.subTest(control=expected):
+                self.assertEqual(control.GetLabel(), expected)
+                self.assertEqual(control.GetName(), expected)
