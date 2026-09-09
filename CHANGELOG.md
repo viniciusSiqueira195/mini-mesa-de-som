@@ -1,5 +1,53 @@
 # Histórico de versões
 
+## 1.2.0 — 2026-09-09
+
+Esta versão adiciona a transmissão do áudio de outros programas junto com o
+microfone e facilita a organização do Painel de efeitos.
+
+### Transmissão do áudio de programas
+
+- Agora é possível escolher um ou mais programas em execução e transmitir o
+  áudio deles junto com o microfone para a saída virtual.
+- A lista de programas fica na guia Dispositivos e pode ser atualizada sem
+  reiniciar a Mini Mesa.
+- A captura identifica cada programa pelo nome e pelo PID, permitindo escolher
+  exatamente quais aplicativos serão transmitidos.
+- Alterações na seleção feitas enquanto a mesa está ativa passam a valer na
+  próxima ativação.
+- Foram adicionados controles independentes para o volume do microfone e dos
+  programas, ajustáveis de 0% a 200%.
+- Os volumes podem ser alterados durante a transmissão.
+- O novo motor nativo utiliza o WASAPI do Windows para capturar e misturar o
+  microfone e os programas selecionados.
+- O componente necessário para essa transmissão já acompanha o instalador.
+
+### Adição de vários efeitos
+
+- Agora é possível selecionar e adicionar vários arquivos ao Painel de efeitos
+  de uma só vez.
+- Cada áudio selecionado pode ser conferido individualmente antes da importação.
+- Se uma prévia for cancelada, nenhum item daquele lote será adicionado
+  parcialmente.
+- A Mini Mesa verifica antecipadamente se há espaço suficiente na página para
+  todos os arquivos escolhidos.
+- Continuam sendo aceitos arquivos WAV, MP3, FLAC e OGG.
+
+### Outros aprimoramentos
+
+- Nomes e descrições de botões, listas, seletores, campos de busca e controles
+  de ajuste ficaram mais claros.
+- Os botões de efeitos anunciam seus estados de forma mais curta, evitando
+  informações repetidas.
+- A navegação durante a importação de vários arquivos ficou mais direta.
+
+### Limitação desta versão
+
+Nesta primeira etapa da migração para o motor nativo, o microfone e os programas
+selecionados são enviados para a saída virtual sem os efeitos de voz, reverb,
+redução de ruído, áudio 3D ou sons do Painel de efeitos. Esses recursos continuam
+visíveis na interface, mas ainda não fazem parte da nova rota nativa.
+
 ## 1.1.0 — 2026-09-07
 
 Esta é uma grande atualização da Mini Mesa de Som, com um painel de efeitos
