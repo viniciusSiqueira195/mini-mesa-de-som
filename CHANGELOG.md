@@ -1,5 +1,58 @@
 # Histórico de versões
 
+## 1.2.3 — 2026-09-09
+
+Esta atualização reúne as correções mais recentes e relembra as novidades das
+versões anteriores para que ninguém fique perdido ao atualizar.
+
+### Correções desta versão
+
+- A transmissão de programas ficou mais estável, sem alterar a velocidade ou a
+  tonalidade do áudio capturado.
+- Um pequeno pré-buffer reduz cortes no início e durante a reprodução dos programas.
+- Reverb, modificadores de voz, efeitos criativos, limpeza da voz, redução de
+  ruído, áudio 3D e o Painel de efeitos voltaram a funcionar na rota principal.
+- O áudio dos programas continua sendo transmitido: o microfone passa pelos
+  efeitos e os programas selecionados são misturados depois, com volume próprio.
+- O Prompt de Comando não deve mais aparecer rapidamente ao abrir a Mini Mesa,
+  atualizar a lista de programas ou iniciar a captura.
+- Ouvir retorno voltou a ser uma caixa de seleção nativa, com estado mais claro
+  para o NVDA.
+- Ao marcar ou desmarcar um programa, o leitor de telas anuncia seu nome, PID e
+  estado. Se a mesa estiver ativa, também avisa que a mudança valerá ao reativá-la.
+- O instalador verifica os componentes necessários e fecha corretamente a versão
+  anterior antes de atualizar os arquivos.
+
+### Novidades recentes reunidas
+
+- É possível selecionar um ou mais programas em execução e transmitir o áudio
+  deles junto com o microfone para Discord, TeamTalk, gravadores e outros destinos.
+- O microfone e os programas possuem volumes independentes, ajustáveis de 0% a 200%.
+- O Painel de efeitos agora começa vazio e aceita os arquivos pessoais do usuário
+  nos formatos WAV, MP3, FLAC e OGG.
+- São dez páginas com até dez efeitos em cada uma. As páginas podem ser renomeadas,
+  pesquisadas e reorganizadas, e os efeitos podem ser movidos entre elas.
+- Vários arquivos podem ser adicionados de uma vez, com prévia individual antes
+  da confirmação e verificação do espaço disponível na página.
+- `Alt+1` a `Alt+0` escolhem as páginas; `Ctrl+1` a `Ctrl+0` tocam as dez posições
+  da página atual; `Ctrl+Shift+0` para todos os efeitos.
+- Atalhos globais opcionais permitem tocar efeitos mesmo com outro programa em foco.
+- Os efeitos podem ser ouvidos no dispositivo de retorno sem obrigar o usuário a
+  ouvir a própria voz.
+- O menu de contexto permite tocar, renomear, substituir, mover e excluir efeitos
+  sem apagar os arquivos originais do computador.
+- A interface foi organizada nas guias Dispositivos, Voz e efeitos, Limpeza da
+  voz, Áudio 3D e Painel de efeitos.
+- Perfis salvam dispositivos, volumes, processamento, páginas e efeitos.
+- Backups podem guardar somente as configurações ou incluir cópias dos áudios para
+  transferência entre computadores.
+- O diagnóstico acessível lista dispositivos e APIs de áudio e pode ser copiado
+  para facilitar pedidos de suporte.
+- O indicador textual do microfone informa sem sinal, nível baixo, adequado ou
+  saturando sem repetir anúncios continuamente no NVDA.
+- `Windows+M` mantém a Mini Mesa funcionando na bandeja. Ela pode ser restaurada
+  pelo ícone e volta a aparecer no `Alt+Tab`.
+
 ## 1.2.2 — 2026-09-09
 
 - Corrige a regressão crítica das versões 1.2.0 e 1.2.1 que fazia os controles
