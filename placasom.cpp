@@ -220,6 +220,7 @@ public:
         if (!available) return {0, 0};
         Frame f = frames[read]; read = (read + 1) % frames.size(); --available; return f;
     }
+    size_t Available() const { return available; }
     unsigned long long Dropped() const { return dropped; }
 };
 struct Stream {
@@ -379,13 +380,15 @@ static int CaptureProcesses(UINT32 rate, const std::vector<DWORD>& selected) {
         DWORD wake = WaitForMultipleObjects(2, events, FALSE, 2000);
         if (wake == WAIT_OBJECT_0) return 0;
         if (wake == WAIT_FAILED) throw std::runtime_error("Falha ao aguardar captura de processo");
-        // A process-loopback packet is not guaranteed to be 512 frames.  The
-        // previous fixed-size write changed the stream's effective playback
-        // rate whenever WASAPI chose a different period, causing pitch shifts
-        // and FIFO underflows.  Keep the pipe clock equal to the capture clock.
-        UINT32 frames = 0;
+        // Process-loopback clients signal independently.  Do not use the
+        // largest packet captured in this wake: doing so pops missing frames
+        // as silence from a client whose packet arrives a few milliseconds
+        // later, which audibly cuts audio whenever two programs are selected.
         for (size_t i = 0; i < captures.size(); ++i)
-            frames = std::max(frames, Capture(*captures[i], fifos[i], nullptr, stop.value));
+            Capture(*captures[i], fifos[i], nullptr, stop.value);
+        UINT32 frames = static_cast<UINT32>(fifos.front().Available());
+        for (size_t i = 1; i < fifos.size(); ++i)
+            frames = std::min(frames, static_cast<UINT32>(fifos[i].Available()));
         if (!frames) continue;
         pcm.resize(static_cast<size_t>(frames) * 2);
         for (UINT32 frame = 0; frame < frames; ++frame) {

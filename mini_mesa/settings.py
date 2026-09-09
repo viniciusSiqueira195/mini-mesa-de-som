@@ -291,3 +291,31 @@ class SoundboardSettings:
         _validate_percent("Ducking do soundboard", self.ducking_percent)
         if not isinstance(self.ducking_enabled, bool):
             raise TypeError("Estado do ducking deve ser verdadeiro ou falso")
+
+
+VALID_RECORDING_FORMATS = ("mp3", "wav", "ogg")
+VALID_RECORDING_BITRATES = (128, 160, 192, 256, 320)
+VALID_RECORDING_MODES = ("both", "voice", "processes")
+
+
+@dataclass(frozen=True, slots=True)
+class RecordingSettings:
+    """Settings for audio recording (format, bitrate, mode, folder, filename)."""
+
+    format: str = "mp3"
+    bitrate_kbps: int = 192
+    mode: str = "both"
+    custom_filename: str = ""
+    folder: str = ""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.format, str) or self.format not in VALID_RECORDING_FORMATS:
+            raise ValueError(f"Formato de gravação deve ser um de: {VALID_RECORDING_FORMATS}")
+        if isinstance(self.bitrate_kbps, bool) or self.bitrate_kbps not in VALID_RECORDING_BITRATES:
+            raise ValueError(f"Taxa de bits deve ser uma de: {VALID_RECORDING_BITRATES}")
+        if not isinstance(self.mode, str) or self.mode not in VALID_RECORDING_MODES:
+            raise ValueError(f"Modo de gravação deve ser um de: {VALID_RECORDING_MODES}")
+        if not isinstance(self.custom_filename, str):
+            raise TypeError("Nome do arquivo deve ser texto")
+        if not isinstance(self.folder, str):
+            raise TypeError("Pasta de gravação deve ser texto")

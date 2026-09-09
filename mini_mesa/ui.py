@@ -21,11 +21,13 @@ from .user_features import ProfileStore, diagnostic_text, export_backup, import_
 from .settings import (
     CreativeEffectSettings,
     ProAudioSettings,
+    RecordingSettings,
     ReverbSettings,
     SoundboardSettings,
     SpatialSettings,
     VoiceSettings,
 )
+from .recorder import default_recordings_directory
 from .updater import (
     UpdateCancelled,
     UpdateError,
@@ -822,6 +824,200 @@ class SoundboardPanel(wx.ScrolledWindow):
             self._on_stop(event)
             return
         event.Skip()
+
+
+
+class RecordingPanel(wx.ScrolledWindow):
+    """Recording tab for audio capture settings and live recording."""
+
+    def __init__(self, parent: wx.Window, frame: MainFrame) -> None:
+        super().__init__(parent, style=wx.VSCROLL | wx.TAB_TRAVERSAL)
+        self.SetScrollRate(0, 12)
+        self.SetMinSize((1, 1))
+        self._frame = frame
+
+        root = wx.BoxSizer(wx.VERTICAL)
+
+        instructions = wx.StaticText(
+            self,
+            label=(
+                "Escolha o formato de áudio, qualidade, modo de captura e pasta de destino para gravar. "
+                "Pressione F8 ou use o botão para iniciar ou parar a gravação."
+            ),
+        )
+        instructions.Wrap(540)
+        root.Add(instructions, 0, wx.ALL | wx.EXPAND, 12)
+
+        box_settings = wx.StaticBoxSizer(wx.VERTICAL, self, "Configurações de gravação")
+        box_panel = box_settings.GetStaticBox()
+
+        box_settings.Add(wx.StaticText(box_panel, label="&Formato de áudio:"), 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
+        self.format_choice = wx.Choice(box_panel, choices=[
+            "MP3 (*.mp3)",
+            "WAV (*.wav)",
+            "OGG Vorbis (*.ogg)",
+        ])
+        _set_choice_accessible_name(self.format_choice, "Formato do arquivo de áudio")
+        fmt_index = {"mp3": 0, "wav": 1, "ogg": 2}.get(frame.preferences.recording_format, 0)
+        self.format_choice.SetSelection(fmt_index)
+        self.format_choice.Bind(wx.EVT_CHOICE, self._on_settings_changed)
+        box_settings.Add(self.format_choice, 0, wx.ALL | wx.EXPAND, 8)
+
+        box_settings.Add(wx.StaticText(box_panel, label="&Qualidade / Taxa de bits (para MP3 e OGG):"), 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
+        self.bitrate_choice = wx.Choice(box_panel, choices=[
+            "128 kbps",
+            "160 kbps",
+            "192 kbps (Recomendado)",
+            "256 kbps",
+            "320 kbps (Máxima)",
+        ])
+        _set_choice_accessible_name(self.bitrate_choice, "Qualidade e taxa de bits")
+        bitrate_index = {128: 0, 160: 1, 192: 2, 256: 3, 320: 4}.get(frame.preferences.recording_bitrate_kbps, 2)
+        self.bitrate_choice.SetSelection(bitrate_index)
+        self.bitrate_choice.Bind(wx.EVT_CHOICE, self._on_settings_changed)
+        box_settings.Add(self.bitrate_choice, 0, wx.ALL | wx.EXPAND, 8)
+
+        box_settings.Add(wx.StaticText(box_panel, label="&Modo de captura de áudio:"), 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
+        self.mode_choice = wx.Choice(box_panel, choices=[
+            "Ambos (Voz + Programas transmitidos)",
+            "Apenas a sua voz (com todos os efeitos)",
+            "Apenas os programas transmitidos",
+        ])
+        _set_choice_accessible_name(self.mode_choice, "Modo de captura de áudio")
+        mode_index = {"both": 0, "voice": 1, "processes": 2}.get(frame.preferences.recording_mode, 0)
+        self.mode_choice.SetSelection(mode_index)
+        self.mode_choice.Bind(wx.EVT_CHOICE, self._on_settings_changed)
+        box_settings.Add(self.mode_choice, 0, wx.ALL | wx.EXPAND, 8)
+
+        box_settings.Add(wx.StaticText(box_panel, label="&Nome do arquivo (opcional; deixe em branco para automático com data e hora):"), 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
+        self.filename_ctrl = wx.TextCtrl(box_panel, value=frame.preferences.recording_custom_filename)
+        _set_control_accessible_name(self.filename_ctrl, "Nome do arquivo para gravação")
+        self.filename_ctrl.Bind(wx.EVT_TEXT, self._on_settings_changed)
+        box_settings.Add(self.filename_ctrl, 0, wx.ALL | wx.EXPAND, 8)
+
+        box_settings.Add(wx.StaticText(box_panel, label="&Pasta de destino das gravações:"), 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
+        folder_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        initial_folder = frame.preferences.recording_folder or str(default_recordings_directory())
+        self.folder_ctrl = wx.TextCtrl(box_panel, value=initial_folder)
+        _set_control_accessible_name(self.folder_ctrl, "Pasta de destino das gravações")
+        self.folder_ctrl.Bind(wx.EVT_TEXT, self._on_settings_changed)
+        folder_sizer.Add(self.folder_ctrl, 1, wx.RIGHT | wx.EXPAND, 6)
+
+        self.browse_folder_button = wx.Button(box_panel, label="&Procurar pasta...")
+        _set_button_accessible_name(self.browse_folder_button, "Procurar pasta de gravação")
+        self.browse_folder_button.Bind(wx.EVT_BUTTON, self._on_browse_folder)
+        folder_sizer.Add(self.browse_folder_button, 0)
+        box_settings.Add(folder_sizer, 0, wx.ALL | wx.EXPAND, 8)
+
+        root.Add(box_settings, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
+
+        box_action = wx.StaticBoxSizer(wx.VERTICAL, self, "Gravação ao vivo")
+        action_panel = box_action.GetStaticBox()
+
+        self.record_button = wx.Button(action_panel, label="&Iniciar gravação (F8)")
+        _set_button_accessible_name(self.record_button, "Iniciar gravação de áudio")
+        self.record_button.Bind(wx.EVT_BUTTON, self._on_toggle_record)
+        box_action.Add(self.record_button, 0, wx.ALL | wx.EXPAND, 8)
+
+        self.record_status = wx.TextCtrl(action_panel, value="Gravação parada.", style=wx.TE_READONLY)
+        _set_control_accessible_name(self.record_status, "Estado da gravação")
+        box_action.Add(self.record_status, 0, wx.ALL | wx.EXPAND, 8)
+
+        root.Add(box_action, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
+
+        self.timer = wx.Timer(self)
+        self.Bind(wx.EVT_TIMER, self._on_timer, self.timer)
+
+        self.SetSizer(root)
+        self.FitInside()
+        self._update_bitrate_enabled_state()
+
+    def _update_bitrate_enabled_state(self) -> None:
+        fmt = ("mp3", "wav", "ogg")[self.format_choice.GetSelection()]
+        self.bitrate_choice.Enable(fmt != "wav")
+
+    def _current_settings(self) -> RecordingSettings:
+        fmt = ("mp3", "wav", "ogg")[self.format_choice.GetSelection()]
+        bitrate = (128, 160, 192, 256, 320)[self.bitrate_choice.GetSelection()]
+        mode = ("both", "voice", "processes")[self.mode_choice.GetSelection()]
+        return RecordingSettings(
+            format=fmt,
+            bitrate_kbps=bitrate,
+            mode=mode,
+            custom_filename=self.filename_ctrl.GetValue().strip(),
+            folder=self.folder_ctrl.GetValue().strip(),
+        )
+
+    def _on_settings_changed(self, _event: wx.Event = None) -> None:
+        self._update_bitrate_enabled_state()
+        settings = self._current_settings()
+        preferences = replace(
+            self._frame._current_preferences(),
+            recording_format=settings.format,
+            recording_bitrate_kbps=settings.bitrate_kbps,
+            recording_mode=settings.mode,
+            recording_custom_filename=settings.custom_filename,
+            recording_folder=settings.folder,
+        )
+        try:
+            self._frame.preferences_store.save(preferences)
+        except OSError as exc:
+            self._frame.SetStatusText(f"Não foi possível salvar as preferências de gravação: {exc}")
+            return
+        self._frame.preferences = preferences
+        self._frame.engine.update_recording_settings(settings)
+
+    def _on_browse_folder(self, _event: wx.Event) -> None:
+        with wx.DirDialog(
+            self,
+            "Escolha a pasta para salvar as gravações",
+            defaultPath=self.folder_ctrl.GetValue().strip() or str(default_recordings_directory()),
+            style=wx.DD_DEFAULT_STYLE | wx.DD_DIR_MUST_EXIST,
+        ) as dialog:
+            if dialog.ShowModal() == wx.ID_OK:
+                self.folder_ctrl.SetValue(dialog.GetPath())
+                self._on_settings_changed()
+
+    def _on_toggle_record(self, _event: wx.Event = None) -> None:
+        if self._frame.engine.is_recording:
+            try:
+                path, duration = self._frame.engine.stop_recording()
+                self.timer.Stop()
+                self.record_button.SetLabel("&Iniciar gravação (F8)")
+                _set_button_accessible_name(self.record_button, "Iniciar gravação de áudio")
+                mins = int(duration // 60)
+                secs = int(duration % 60)
+                msg = f"Gravação salva ({mins:02d}:{secs:02d}): {path.name}"
+                self.record_status.SetValue(msg)
+                self.record_status.SetName(f"Estado da gravação: {msg}")
+                self._frame.SetStatusText(msg)
+                self._frame._play_feedback("toggle_off")
+            except Exception as exc:
+                self._frame._show_error(f"Erro ao encerrar a gravação.\n\n{exc}")
+        else:
+            settings = self._current_settings()
+            try:
+                path = self._frame.engine.start_recording(settings)
+                self.timer.Start(1000)
+                self.record_button.SetLabel("&Parar gravação (F8)")
+                _set_button_accessible_name(self.record_button, "Parar gravação de áudio")
+                msg = f"Gravando ({path.name})..."
+                self.record_status.SetValue(msg)
+                self.record_status.SetName(f"Estado da gravação: {msg}")
+                self._frame.SetStatusText(msg)
+                self._frame._play_feedback("toggle_on")
+            except Exception as exc:
+                self._frame._show_error(f"Não foi possível iniciar a gravação.\n\n{exc}")
+
+    def _on_timer(self, _event: wx.Event) -> None:
+        if self._frame.engine.is_recording:
+            elapsed = self._frame.engine.recording_elapsed_seconds
+            mins = int(elapsed // 60)
+            secs = int(elapsed % 60)
+            msg = f"Gravando: {mins:02d}:{secs:02d}"
+            self.record_status.SetValue(msg)
+            self.record_status.SetName(f"Estado da gravação: {msg}")
+
 
 
 class ReleaseNotesDialog(wx.Dialog):
@@ -1670,6 +1866,8 @@ class MainFrame(wx.Frame):
 
         self.soundboard_panel = SoundboardPanel(self.notebook, self)
         self.notebook.AddPage(self.soundboard_panel, "Painel de efeitos")
+        self.recording_panel = RecordingPanel(self.notebook, self)
+        self.notebook.AddPage(self.recording_panel, "Gravar")
         for page in pages:
             page.FitInside()
         root.Add(self.notebook, 1, wx.ALL | wx.EXPAND, 8)
@@ -1788,6 +1986,7 @@ class MainFrame(wx.Frame):
         self._id_f3 = wx.NewIdRef()
         self._id_f4 = wx.NewIdRef()
         self._id_f6 = wx.NewIdRef()
+        self._id_f8 = wx.NewIdRef()
         accelerators = [
             (wx.ACCEL_NORMAL, wx.WXK_F5, wx.ID_REFRESH),
             (wx.ACCEL_NORMAL, wx.WXK_F1, self._project_help_id),
@@ -1795,6 +1994,7 @@ class MainFrame(wx.Frame):
             (wx.ACCEL_NORMAL, wx.WXK_F3, self._id_f3),
             (wx.ACCEL_NORMAL, wx.WXK_F4, self._id_f4),
             (wx.ACCEL_NORMAL, wx.WXK_F6, self._id_f6),
+            (wx.ACCEL_NORMAL, wx.WXK_F8, self._id_f8),
             (wx.ACCEL_CTRL | wx.ACCEL_SHIFT, ord("E"), self._open_soundboard_id),
             (wx.ACCEL_CTRL | wx.ACCEL_SHIFT, ord("0"), self._stop_effects_id),
         ]
@@ -1813,6 +2013,7 @@ class MainFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, lambda _e: self.soundboard_panel.play_index(1), id=self._id_f3)
         self.Bind(wx.EVT_MENU, lambda _e: self.soundboard_panel.play_index(2), id=self._id_f4)
         self.Bind(wx.EVT_MENU, self._on_browse_soundboard_file, id=self._id_f6)
+        self.Bind(wx.EVT_MENU, lambda _e: self.recording_panel._on_toggle_record(), id=self._id_f8)
         self.Bind(
             wx.EVT_MENU,
             self._on_open_soundboard,
@@ -2394,6 +2595,11 @@ class MainFrame(wx.Frame):
         self._refresh_devices()
         self._refresh_processes()
 
+    @staticmethod
+    def _format_process_item_label(item: ProcessItem, is_checked: bool) -> str:
+        state = "marcado" if is_checked else "desmarcado"
+        return f"{item.label}, {state}"
+
     def _on_refresh_processes(self, _event: wx.Event) -> None:
         self._refresh_processes()
 
@@ -2402,12 +2608,29 @@ class MainFrame(wx.Frame):
         index = event.GetSelection()
         if 0 <= index < len(self._process_items):
             item = self._process_items[index]
-            state = "marcado" if self.process_list.IsChecked(index) else "desmarcado"
+            is_checked = self.process_list.IsChecked(index)
+            new_label = self._format_process_item_label(item, is_checked)
+            set_string = getattr(self.process_list, "SetString", None)
+            if set_string is not None:
+                set_string(index, new_label)
+            check = getattr(self.process_list, "Check", None)
+            if check is not None:
+                check(index, is_checked)
+            state = "marcado" if is_checked else "desmarcado"
             message = f"{item.label}: {state} para transmissão."
         else:
             message = "A seleção de programas foi atualizada."
         if self.engine.is_running:
-            message += " A alteração será aplicada ao reativar a mesa."
+            updater = getattr(self.engine, "update_transmitted_processes", None)
+            if updater is None:
+                message += " A alteração será aplicada ao reativar a mesa."
+            else:
+                try:
+                    updater(self._selected_process_pids())
+                except Exception as exc:
+                    message += f" Não foi possível aplicar agora: {exc}"
+                else:
+                    message += " Alteração aplicada agora."
         self.SetStatusText(message)
         event.Skip()
 
@@ -2424,7 +2647,11 @@ class MainFrame(wx.Frame):
             or set(self.preferences.transmitted_processes)
         )
         self._process_items = list_candidate_processes()
-        self.process_list.Set([item.label for item in self._process_items])
+        labels = [
+            self._format_process_item_label(item, item.pid in selected)
+            for item in self._process_items
+        ]
+        self.process_list.Set(labels)
         for index, item in enumerate(self._process_items):
             self.process_list.Check(index, item.pid in selected)
 
@@ -2607,6 +2834,11 @@ class MainFrame(wx.Frame):
             soundboard_volume_percent=self._soundboard_settings.volume_percent,
             soundboard_ducking_enabled=self._soundboard_settings.ducking_enabled,
             soundboard_ducking_percent=self._soundboard_settings.ducking_percent,
+            recording_format=self.recording_panel._current_settings().format,
+            recording_bitrate_kbps=self.recording_panel._current_settings().bitrate_kbps,
+            recording_mode=self.recording_panel._current_settings().mode,
+            recording_custom_filename=self.recording_panel.filename_ctrl.GetValue().strip(),
+            recording_folder=self.recording_panel.folder_ctrl.GetValue().strip(),
         )
 
     def _apply_loaded_preferences(self, preferences: AppPreferences) -> None:
@@ -2691,6 +2923,17 @@ class MainFrame(wx.Frame):
         soundboard._refresh_effects()
         self._update_page_menu_labels()
         self._feedback_item.Check(preferences.feedback_sounds_enabled)
+        rec_fmt_index = {"mp3": 0, "wav": 1, "ogg": 2}.get(preferences.recording_format, 0)
+        self.recording_panel.format_choice.SetSelection(rec_fmt_index)
+        rec_bitrate_index = {128: 0, 160: 1, 192: 2, 256: 3, 320: 4}.get(preferences.recording_bitrate_kbps, 2)
+        self.recording_panel.bitrate_choice.SetSelection(rec_bitrate_index)
+        rec_mode_index = {"both": 0, "voice": 1, "processes": 2}.get(preferences.recording_mode, 0)
+        self.recording_panel.mode_choice.SetSelection(rec_mode_index)
+        self.recording_panel.filename_ctrl.ChangeValue(preferences.recording_custom_filename)
+        self.recording_panel.folder_ctrl.ChangeValue(
+            preferences.recording_folder or str(default_recordings_directory())
+        )
+        self.recording_panel._update_bitrate_enabled_state()
         self.preferences_store.save(preferences)
         self._apply_global_hotkeys()
         self._set_routing_controls_enabled(True)
@@ -2943,8 +3186,10 @@ class MainFrame(wx.Frame):
         self.monitor_checkbox.Enable()
         self.monitor_choice.Enable()
         self.refresh_button.Enable(enabled)
-        self.process_list.Enable(enabled)
-        self.refresh_processes_button.Enable(enabled)
+        # Process capture can be replaced while the route is active, so keep
+        # this list available to add or remove transmitted programs live.
+        self.process_list.Enable()
+        self.refresh_processes_button.Enable()
         self.noise_reduction_checkbox.Enable()
 
     def _selected_monitor_output(self) -> str | None:

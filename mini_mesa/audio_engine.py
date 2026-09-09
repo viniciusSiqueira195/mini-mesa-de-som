@@ -14,11 +14,13 @@ from .noise_reduction import RNNOISE_SAMPLE_RATE, RNNoiseReducer
 from .settings import (
     CreativeEffectSettings,
     ProAudioSettings,
+    RecordingSettings,
     ReverbSettings,
     SoundboardSettings,
     SpatialSettings,
     VoiceSettings,
 )
+from .recorder import AudioRecorder
 from .soundboard import (
     SoundboardManager,
     SoundEffectInfo,
@@ -752,6 +754,8 @@ class AudioBackend(Protocol):
 
     def update_soundboard(self, settings: SoundboardSettings) -> None: ...
 
+    def update_processes(self, process_pids: Sequence[int]) -> None: ...
+
     def set_volumes(self, microphone: float, processes: float) -> None: ...
 
     def play_sound(self, sound_id_or_path: str) -> bool: ...
@@ -1009,9 +1013,14 @@ class PedalboardBackend:
                                 self._np, tuple(process_pids), sample_rate
                             )
                             # The helper emits PCM through a separate process.
-                            # Keep two callback blocks in reserve before mixing
-                            # it; take() remains non-blocking inside PortAudio.
-                            process_source.set_prebuffer_frames(block_size * 2)
+                            # A recording writer can briefly contend with its
+                            # reader, so reserve 100 ms instead of only two
+                            # callbacks before the real-time mixer begins.
+                            process_source.set_prebuffer_frames(
+                                max(block_size * 4, round(sample_rate * 0.1))
+                            )
+
+
                         stream = _MultiOutputSoundDeviceStream(
                             sounddevice=self._sd,
                             input_id=input_id,
@@ -1264,6 +1273,29 @@ class PedalboardBackend:
             self._soundboard_settings = settings
             if self._soundboard is not None:
                 self._soundboard.set_volume_percent(settings.volume_percent)
+
+    def update_processes(self, process_pids: Sequence[int]) -> None:
+        """Replace process-loopback capture without reopening the audio route."""
+
+        pids = tuple(sorted({int(pid) for pid in process_pids if int(pid) > 0}))
+        with self._processing_lock:
+            stream = self._active_stream
+            sample_rate = self._sample_rate
+        if stream is None:
+            return
+
+        source = None
+        try:
+            if pids:
+                source = ProcessAudioSource(self._np, pids, sample_rate)
+                source.set_prebuffer_frames(
+                    max(stream._block_size * 4, round(sample_rate * 0.1))
+                )
+            stream.replace_process_source(source)
+        except Exception:
+            if source is not None:
+                source.close()
+            raise
 
     def set_volumes(self, microphone: float, processes: float) -> None:
         with self._processing_lock:
@@ -1925,6 +1957,7 @@ class _MultiOutputSoundDeviceStream:
         self._effects_processor = effects_processor
         self._monitor_voice = monitor_voice
         self._process_source = process_source
+        self._process_source_lock = threading.Lock()
         self._process_gain = process_gain or (lambda: 1.0)
         self._sample_rate = sample_rate
         self._block_size = block_size
@@ -1943,6 +1976,7 @@ class _MultiOutputSoundDeviceStream:
         self._closed = False
         self._pending_monitor: _BufferedAudioOutput | None = None
         self._monitor_output: _BufferedAudioOutput | None = None
+        self._recorder = None
         self._input = sounddevice.InputStream(
             device=input_id,
             samplerate=sample_rate,
@@ -2029,25 +2063,53 @@ class _MultiOutputSoundDeviceStream:
         if dispose_here:
             self._close_streams()
 
+    def set_recorder(self, recorder) -> None:
+        self._recorder = recorder
+
+    def replace_process_source(self, source) -> None:
+        """Switch selected-process capture while the microphone stream runs."""
+
+        with self._process_source_lock:
+            previous = self._process_source
+            self._process_source = source
+        if previous is not None:
+            previous.close()
+
     def _on_input(self, indata, frames, _time_info, _status) -> None:
         if self._validating:
             return
         try:
-            processed = self._processor(indata, frames)
-            if self._process_source is not None:
-                processed = (
-                    processed
-                    + self._process_source.take(frames) * self._process_gain()
-                ).clip(-1.0, 1.0)
+            voice_processed = self._processor(indata, frames)
+            proc_audio = None
+            with self._process_source_lock:
+                source = self._process_source
+                if source is not None:
+                    proc_audio = source.take(frames) * self._process_gain()
+            if proc_audio is not None:
+                processed = (voice_processed + proc_audio).clip(-1.0, 1.0)
+            else:
+                processed = voice_processed
         except Exception as exc:
             self._error = exc
             self._stop_event.set()
             raise self._sd.CallbackAbort
 
-        # The virtual cable is the recording path and always receives the block
-        # first. A congested experimental monitor is allowed to drop its copy,
-        # but can never hold up the input callback or the primary output.
         self._primary_output.push(processed)
+        recorder = self._recorder
+        if recorder is not None and getattr(recorder, "is_recording", False):
+            mode = getattr(recorder, "mode", "both")
+            if mode == "voice":
+                rec_block = voice_processed
+            elif mode == "processes":
+                rec_block = (
+                    proc_audio
+                    if proc_audio is not None
+                    else processed * 0.0
+                )
+            else:
+                rec_block = processed
+            recorder.push(rec_block)
+
         with self._outputs_lock:
             monitor_audio = processed
             if not self._monitor_voice and self._effects_processor is not None:
@@ -2145,9 +2207,11 @@ class _MultiOutputSoundDeviceStream:
                         stream.close()
                 except Exception:
                     pass
-            if self._process_source is not None:
-                self._process_source.close()
+            with self._process_source_lock:
+                process_source = self._process_source
                 self._process_source = None
+            if process_source is not None:
+                process_source.close()
 
     def _abort_streams(self) -> None:
         with self._outputs_lock:
@@ -2177,6 +2241,8 @@ class AudioEngine:
         self._creative_settings = CreativeEffectSettings()
         self._pro_audio_settings = ProAudioSettings()
         self._soundboard_settings = SoundboardSettings()
+        self._recording_settings = RecordingSettings()
+        self._recorder: AudioRecorder | None = None
         self._stream: AudioStream | None = None
         self._thread: threading.Thread | None = None
         self._input_device: str | None = None
@@ -2258,6 +2324,16 @@ class AudioEngine:
         with self._lock:
             self._soundboard_settings = settings
             self._backend.update_soundboard(settings)
+
+    def update_transmitted_processes(self, process_pids: Sequence[int]) -> None:
+        pids = tuple(sorted({int(pid) for pid in process_pids if int(pid) > 0}))
+        with self._lock:
+            if self._stream is None:
+                return
+            updater = getattr(self._backend, "update_processes", None)
+            if updater is None:
+                raise RuntimeError("Este motor de áudio não permite alterar programas em execução.")
+            updater(pids)
 
     def set_volumes(self, microphone: float, processes: float) -> None:
         values = (microphone, processes)
@@ -2363,6 +2439,12 @@ class AudioEngine:
                 stream.set_monitor_voice(monitor_output is not None)
             self._effects_output = effects_output
             self._stream = stream
+            if self._recorder is not None and self._recorder.is_recording:
+                setter = getattr(stream, "set_recorder", None)
+                if setter is not None:
+                    setter(self._recorder)
+                else:
+                    setattr(stream, "_recorder", self._recorder)
             self._input_device = input_device
             self._output_device = output_device
             self._monitor_output = monitor_output
@@ -2430,8 +2512,70 @@ class AudioEngine:
         with self._lock:
             self._backend.stop_sound_effects()
 
+    @property
+    def recording_settings(self) -> RecordingSettings:
+        with self._lock:
+            return self._recording_settings
+
+    def update_recording_settings(self, settings: RecordingSettings) -> None:
+        with self._lock:
+            self._recording_settings = settings
+
+    def start_recording(self, settings: RecordingSettings | None = None) -> Path:
+        with self._lock:
+            if settings is not None:
+                self._recording_settings = settings
+            if self._recorder is not None and self._recorder.is_recording:
+                raise RuntimeError("A gravação já está em andamento.")
+            self._recorder = AudioRecorder(
+                self._recording_settings,
+                # The writer header must match the stream negotiated with the
+                # selected Windows devices; assuming 48 kHz changes playback
+                # speed on a 44.1-kHz route.
+                sample_rate=round(getattr(self._stream, "_sample_rate", 48_000)),
+            )
+            if self._stream is not None:
+                setter = getattr(self._stream, "set_recorder", None)
+                if setter is not None:
+                    setter(self._recorder)
+                else:
+                    setattr(self._stream, "_recorder", self._recorder)
+            return self._recorder.file_path
+
+    def stop_recording(self) -> tuple[Path, float]:
+        with self._lock:
+            recorder = self._recorder
+            if recorder is None:
+                raise RuntimeError("Nenhuma gravação está em andamento.")
+            self._recorder = None
+            if self._stream is not None:
+                setter = getattr(self._stream, "set_recorder", None)
+                if setter is not None:
+                    setter(None)
+                else:
+                    setattr(self._stream, "_recorder", None)
+            return recorder.stop()
+
+    @property
+    def is_recording(self) -> bool:
+        with self._lock:
+            return self._recorder is not None and self._recorder.is_recording
+
+    @property
+    def recording_elapsed_seconds(self) -> float:
+        with self._lock:
+            if self._recorder is not None:
+                return self._recorder.elapsed_seconds
+            return 0.0
+
     def stop(self, *, timeout: float = 2.0) -> None:
         with self._lock:
+            if self._recorder is not None:
+                try:
+                    self._recorder.stop()
+                except Exception:
+                    pass
+                self._recorder = None
             stream = self._stream
             thread = self._thread
             if stream is None:

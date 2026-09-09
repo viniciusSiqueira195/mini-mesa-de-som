@@ -146,6 +146,9 @@ class AccessibilityFeatureTests(unittest.TestCase):
             (self.frame.creative_choice, "Estilo de voz especial"),
             (self.frame.modulation_choice, "Modulação"),
             (self.frame.ambience_choice, "Ambiente"),
+            (self.frame.recording_panel.format_choice, "Formato do arquivo de áudio"),
+            (self.frame.recording_panel.bitrate_choice, "Qualidade e taxa de bits"),
+            (self.frame.recording_panel.mode_choice, "Modo de captura de áudio"),
         )
         for control, expected in choice_labels:
             with self.subTest(control=expected):

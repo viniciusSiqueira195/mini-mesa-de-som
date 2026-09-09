@@ -63,13 +63,22 @@ class ProcessSelectionAnnouncementTests(unittest.TestCase):
     @staticmethod
     def _frame(*, checked: bool, running: bool):
         messages: list[str] = []
+        labels: dict[int, str] = {}
+        checked_states: dict[int, bool] = {0: checked}
         return types.SimpleNamespace(
             _process_items=(types.SimpleNamespace(pid=42, label="player.exe (PID 42)"),),
-            process_list=types.SimpleNamespace(IsChecked=lambda index: checked),
+            process_list=types.SimpleNamespace(
+                IsChecked=lambda index: checked,
+                SetString=labels.__setitem__,
+                Check=checked_states.__setitem__,
+            ),
             engine=types.SimpleNamespace(is_running=running),
             _save_preferences=lambda: None,
+            _format_process_item_label=ui.MainFrame._format_process_item_label,
             SetStatusText=messages.append,
             messages=messages,
+            labels=labels,
+            checked_states=checked_states,
         )
 
     def test_checked_program_announcement_identifies_the_process(self) -> None:
@@ -79,6 +88,7 @@ class ProcessSelectionAnnouncementTests(unittest.TestCase):
         ui.MainFrame._on_process_selection_changed(frame, event)
 
         self.assertEqual(frame.messages, ["player.exe (PID 42): marcado para transmissão."])
+        self.assertEqual(frame.labels.get(0), "player.exe (PID 42), marcado")
         self.assertTrue(event.skipped)
 
     def test_unchecked_program_says_it_applies_on_next_activation(self) -> None:
@@ -91,6 +101,53 @@ class ProcessSelectionAnnouncementTests(unittest.TestCase):
             ["player.exe (PID 42): desmarcado para transmissão. "
              "A alteração será aplicada ao reativar a mesa."],
         )
+        self.assertEqual(frame.labels.get(0), "player.exe (PID 42), desmarcado")
+
+    def test_running_program_selection_is_applied_immediately(self) -> None:
+        frame = self._frame(checked=True, running=True)
+        applied: list[tuple[int, ...]] = []
+        frame._selected_process_pids = lambda: (42,)
+        frame.engine.update_transmitted_processes = lambda pids: applied.append(pids)
+
+        ui.MainFrame._on_process_selection_changed(frame, _FakeEvent(selection=0))
+
+        self.assertEqual(applied, [(42,)])
+        self.assertEqual(
+            frame.messages,
+            ["player.exe (PID 42): marcado para transmissão. Alteração aplicada agora."],
+        )
+
+    def test_process_item_label_includes_marcado_state_for_nvda(self) -> None:
+        item = types.SimpleNamespace(label="discord.exe (PID 1234)")
+        self.assertEqual(
+            ui.MainFrame._format_process_item_label(item, is_checked=True),
+            "discord.exe (PID 1234), marcado",
+        )
+        self.assertEqual(
+            ui.MainFrame._format_process_item_label(item, is_checked=False),
+            "discord.exe (PID 1234), desmarcado",
+        )
+
+    def test_process_controls_remain_enabled_while_route_controls_are_locked(self) -> None:
+        class Control:
+            def __init__(self):
+                self.calls = []
+
+            def Enable(self, *args):
+                self.calls.append(args)
+
+        frame = types.SimpleNamespace(
+            input_choice=Control(), output_choice=Control(), monitor_checkbox=Control(),
+            monitor_choice=Control(), refresh_button=Control(), process_list=Control(),
+            refresh_processes_button=Control(), noise_reduction_checkbox=Control(),
+        )
+
+        ui.MainFrame._set_routing_controls_enabled(frame, False)
+
+        self.assertEqual(frame.input_choice.calls, [(False,)])
+        self.assertEqual(frame.process_list.calls, [()])
+        self.assertEqual(frame.refresh_processes_button.calls, [()])
+
 
 
 class CreativeChoiceEventTests(unittest.TestCase):

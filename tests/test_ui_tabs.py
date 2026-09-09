@@ -44,15 +44,15 @@ class NotebookTests(unittest.TestCase):
         book = self.frame.notebook
         self.assertEqual(
             [book.GetPageText(i) for i in range(book.GetPageCount())],
-            ["Dispositivos", "Voz e efeitos", "Limpeza da voz", "Áudio 3D", "Painel de efeitos"],
+            ["Dispositivos", "Voz e efeitos", "Limpeza da voz", "Áudio 3D", "Painel de efeitos", "Gravar"],
         )
-        for expected in (1, 2, 3, 4, 0):
+        for expected in (1, 2, 3, 4, 5, 0):
             self.key(ui.wx.WXK_TAB, ctrl=True)
             self.assertEqual(book.GetSelection(), expected)
             for index in range(book.GetPageCount()):
                 self.assertEqual(book.GetPage(index).IsShown(), index == expected)
         self.key(ui.wx.WXK_TAB, ctrl=True, shift=True)
-        self.assertEqual(book.GetSelection(), 4)
+        self.assertEqual(book.GetSelection(), 5)
         self.assertEqual(self.engine.mock_calls, [])
         self.store.save.assert_not_called()
 

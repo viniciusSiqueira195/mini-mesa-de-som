@@ -63,6 +63,21 @@ class SoundboardMixerTests(unittest.TestCase):
             mixer.trigger("applause")
             np.testing.assert_allclose(mixer.mix(4), np.full((4, 2), 0.3), atol=0.0001)
 
+    def test_retriggering_the_same_effect_restarts_instead_of_layering(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            assets = Path(directory)
+            _write_test_wave(assets / "pistol.wav", np.array([0.1, 0.2, 0.3]))
+            mixer = SoundboardMixer(assets)
+            mixer.set_volume_percent(100)
+
+            mixer.trigger("pistol")
+            np.testing.assert_allclose(mixer.mix(1)[:, 0], [0.1], atol=0.0001)
+            mixer.trigger("pistol")
+
+            np.testing.assert_allclose(
+                mixer.mix(3)[:, 0], [0.1, 0.2, 0.3], atol=0.0001
+            )
+
     def test_custom_audio_file_is_loaded_and_resampled(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "custom.flac"

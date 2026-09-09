@@ -60,4 +60,4 @@ def test_process_source_records_an_underflow_after_it_is_primed() -> None:
 
     np.testing.assert_allclose(rendered[:2], 0.25)
     np.testing.assert_array_equal(rendered[2:], np.zeros((2, 2), dtype=np.float32))
-    assert source._underflow_count == 1
+    assert source.underflow_count == 1
