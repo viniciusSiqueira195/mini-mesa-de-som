@@ -1008,7 +1008,7 @@ class RecordingPanel(wx.ScrolledWindow):
                 self.record_status.SetValue(msg)
                 self.record_status.SetName(f"Estado da gravação: {msg}")
                 self._frame.SetStatusText(msg)
-                self._frame._play_feedback("toggle_on")
+                self._frame._play_feedback("recording_start")
             except Exception as exc:
                 self._frame._show_error(f"Não foi possível iniciar a gravação.\n\n{exc}")
 
@@ -2312,10 +2312,17 @@ class MainFrame(wx.Frame):
         self._play_feedback("page")
 
     def _play_feedback(self, kind: str) -> None:
-        if not self.preferences.feedback_sounds_enabled:
+        if kind != "recording_start" and not self.preferences.feedback_sounds_enabled:
             return
         try:
             import winsound
+            if kind == "recording_start":
+                sound_path = Path(__file__).parent / "assets" / "feedback" / "recording_start.wav"
+                winsound.PlaySound(
+                    str(sound_path),
+                    winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_NODEFAULT,
+                )
+                return
             sound = winsound.MB_OK if kind in {"start", "page"} else winsound.MB_ICONASTERISK
             winsound.MessageBeep(sound)
         except (ImportError, RuntimeError):
