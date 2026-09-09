@@ -2,6 +2,8 @@ from datetime import datetime
 from pathlib import Path
 import tempfile
 import unittest
+from queue import Full
+from unittest.mock import Mock
 import numpy as np
 
 from mini_mesa.recorder import AudioRecorder, generate_default_filename, default_recordings_directory
@@ -10,6 +12,18 @@ from mini_mesa.audio_engine import AudioEngine, PedalboardBackend
 
 
 class RecorderTests(unittest.TestCase):
+    def test_queue_filling_during_push_drops_block_without_interrupting_audio(self):
+        recorder = AudioRecorder.__new__(AudioRecorder)
+        recorder._recording = True
+        recorder._dropped_blocks = 0
+        recorder._queue = Mock()
+        recorder._queue.full.return_value = False
+        recorder._queue.put_nowait.side_effect = Full
+
+        recorder.push(np.zeros((4, 2), dtype=np.float32))
+
+        self.assertEqual(recorder.dropped_blocks, 1)
+
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.folder = Path(self.temp_dir.name)

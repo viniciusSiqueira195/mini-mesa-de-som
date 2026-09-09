@@ -3,7 +3,7 @@ from __future__ import annotations
 import types
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from pathlib import Path
 
 from mini_mesa import ui
@@ -39,6 +39,47 @@ class _FakeControl:
 
     def Enable(self, enabled: bool) -> None:
         self.enabled = enabled
+
+
+class RecordingControlTests(unittest.TestCase):
+    def test_recording_requires_running_mixer(self) -> None:
+        engine = Mock(is_recording=False, is_running=False)
+        frame = Mock(engine=engine)
+        panel = Mock(_frame=frame)
+
+        ui.RecordingPanel._on_toggle_record(panel)
+
+        frame._show_error.assert_called_once_with(
+            "Inicie a mesa de som antes de iniciar a gravação."
+        )
+        engine.start_recording.assert_not_called()
+        panel.timer.Start.assert_not_called()
+
+    def test_running_mixer_can_start_recording(self) -> None:
+        engine = Mock(is_recording=False, is_running=True)
+        engine.start_recording.return_value = Path("recording.wav")
+        frame = Mock(engine=engine)
+        panel = Mock(_frame=frame)
+
+        with patch.object(ui, "_set_button_accessible_name"):
+            ui.RecordingPanel._on_toggle_record(panel)
+
+        engine.start_recording.assert_called_once_with(panel._current_settings.return_value)
+        panel.timer.Start.assert_called_once_with(1000)
+        frame._show_error.assert_not_called()
+
+    def test_active_recording_can_still_be_stopped(self) -> None:
+        engine = Mock(is_recording=True, is_running=False)
+        engine.stop_recording.return_value = (Path("recording.wav"), 2.0)
+        frame = Mock(engine=engine)
+        panel = Mock(_frame=frame)
+
+        with patch.object(ui, "_set_button_accessible_name"):
+            ui.RecordingPanel._on_toggle_record(panel)
+
+        engine.stop_recording.assert_called_once_with()
+        panel.timer.Stop.assert_called_once_with()
+        frame._show_error.assert_not_called()
 
 
 class VoiceControlTests(unittest.TestCase):

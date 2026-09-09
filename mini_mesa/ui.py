@@ -995,6 +995,9 @@ class RecordingPanel(wx.ScrolledWindow):
             except Exception as exc:
                 self._frame._show_error(f"Erro ao encerrar a gravação.\n\n{exc}")
         else:
+            if not self._frame.engine.is_running:
+                self._frame._show_error("Inicie a mesa de som antes de iniciar a gravação.")
+                return
             settings = self._current_settings()
             try:
                 path = self._frame.engine.start_recording(settings)

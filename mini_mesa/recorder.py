@@ -5,7 +5,7 @@ import datetime
 import os
 import threading
 from pathlib import Path
-from queue import Empty, Queue
+from queue import Empty, Full, Queue
 
 import numpy as np
 import soundfile as sf
