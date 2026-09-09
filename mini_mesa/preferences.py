@@ -75,6 +75,9 @@ class AppPreferences:
     last_seen_news_version: str = ""
     input_device: str = ""
     output_device: str = ""
+    transmitted_processes: tuple[int, ...] = ()
+    microphone_volume_percent: int = 100
+    process_volume_percent: int = 100
     monitor_enabled: bool = False
     monitor_device: str = ""
     reverb_enabled: bool = True
@@ -143,6 +146,12 @@ class AppPreferences:
         def bool_value(name: str, default: bool) -> bool:
             value = data.get(name, default)
             return value if isinstance(value, bool) else default
+
+        raw_processes = data.get("transmitted_processes", ())
+        transmitted_processes = tuple(
+            sorted({value for value in raw_processes if isinstance(value, int)
+                    and not isinstance(value, bool) and value > 0})
+        ) if isinstance(raw_processes, list) else ()
 
         def float_db_value(name: str, default: float) -> float:
             val = data.get(name, default)
@@ -235,6 +244,13 @@ class AppPreferences:
                 return default
             return value
 
+        def volume_value(name: str) -> int:
+            value = data.get(name, 100)
+            return value if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 200 else 100
+
+        microphone_volume = volume_value("microphone_volume_percent")
+        process_volume = volume_value("process_volume_percent")
+
         style_intensity = percent_value(
             "style_intensity_percent", defaults.style_intensity_percent
         )
@@ -272,6 +288,9 @@ class AppPreferences:
             welcome_shown=bool_value("welcome_shown", defaults.welcome_shown),
             input_device=text_value("input_device", defaults.input_device),
             output_device=text_value("output_device", defaults.output_device),
+            transmitted_processes=transmitted_processes,
+            microphone_volume_percent=microphone_volume,
+            process_volume_percent=process_volume,
             monitor_enabled=bool_value(
                 "monitor_enabled", defaults.monitor_enabled
             ),
