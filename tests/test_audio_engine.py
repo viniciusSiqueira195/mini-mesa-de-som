@@ -938,6 +938,7 @@ class PedalboardProcessingTests(unittest.TestCase):
         source_constructor.assert_called_once_with(
             backend._np, (123, 456), 44_100.0
         )
+        source_constructor.return_value.set_prebuffer_frames.assert_called_once_with(1024)
         self.assertIs(
             stream_constructor.call_args.kwargs["process_source"],
             source_constructor.return_value,

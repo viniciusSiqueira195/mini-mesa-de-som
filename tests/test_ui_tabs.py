@@ -88,14 +88,13 @@ class NotebookTests(unittest.TestCase):
         self.assertFalse(self.frame.reverb_checkbox.GetValue())
         self.assertFalse(self.frame.reverb_level.IsEnabled())
 
-    def test_programmatic_restore_updates_button_action_and_accessible_name(self) -> None:
-        button = self.frame.monitor_checkbox
-        button.SetValue(True)
-        self.assertIn("Desativar", button.GetLabel())
-        button.SetValue(False)
-        self.assertIn("Ativar", button.GetLabel())
-        self.assertNotIn("Ligado", button.GetLabel())
-        self.assertNotIn("Desligado", button.GetName())
+    def test_monitor_uses_a_stable_native_checkbox_label(self) -> None:
+        checkbox = self.frame.monitor_checkbox
+        self.assertIsInstance(checkbox, ui.wx.CheckBox)
+        self.assertEqual(checkbox.GetLabel(), "&Ouvir retorno")
+        self.assertEqual(checkbox.GetName(), "Ouvir retorno")
+        checkbox.SetValue(True)
+        self.assertEqual(checkbox.GetLabel(), "&Ouvir retorno")
         self.assertEqual(self.engine.mock_calls, [])
 
     def test_native_toggle_event_updates_state_and_audio(self) -> None:

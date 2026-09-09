@@ -267,11 +267,12 @@ static UINT32 DeviceRate(const std::wstring& id) {
     if (!rate) throw std::runtime_error("Taxa de amostragem invalida");
     return rate;
 }
-static void Capture(Stream& s, Fifo& mix, Fifo* monitor, HANDLE stop) {
+static UINT32 Capture(Stream& s, Fifo& mix, Fifo* monitor, HANDLE stop) {
+    UINT32 captured = 0;
     for (;;) {
-        if (WaitForSingleObject(stop, 0) == WAIT_OBJECT_0) return;
+        if (WaitForSingleObject(stop, 0) == WAIT_OBJECT_0) return captured;
         UINT32 available = 0; Check(s.capture->GetNextPacketSize(&available), "Ler estado da captura");
-        if (!available) return;
+        if (!available) return captured;
         BYTE* data = nullptr; UINT32 count = 0; DWORD flags = 0;
         Check(s.capture->GetBuffer(&data, &count, &flags, nullptr, nullptr), "Ler captura");
         try {
@@ -280,6 +281,7 @@ static void Capture(Stream& s, Fifo& mix, Fifo* monitor, HANDLE stop) {
                 Frame f = (flags & AUDCLNT_BUFFERFLAGS_SILENT) ? Frame{0, 0} : Frame{samples[i * 2], samples[i * 2 + 1]};
                 mix.Push(f); if (monitor) monitor->Push(f);
             }
+            captured += count;
         } catch (...) { s.capture->ReleaseBuffer(count); throw; }
         Check(s.capture->ReleaseBuffer(count), "Liberar captura");
     }
@@ -371,14 +373,22 @@ static int CaptureProcesses(UINT32 rate, const std::vector<DWORD>& selected) {
         fifos.emplace_back(rate * 2);
     }
     for (auto& stream : captures) { Check(stream->client->Start(), "Iniciar captura de processo"); stream->started = true; }
-    std::vector<float> pcm(512 * 2);
+    std::vector<float> pcm;
     HANDLE events[] = {stop.value, audioEvent.value};
     while (true) {
         DWORD wake = WaitForMultipleObjects(2, events, FALSE, 2000);
         if (wake == WAIT_OBJECT_0) return 0;
         if (wake == WAIT_FAILED) throw std::runtime_error("Falha ao aguardar captura de processo");
-        for (size_t i = 0; i < captures.size(); ++i) Capture(*captures[i], fifos[i], nullptr, stop.value);
-        for (size_t frame = 0; frame < 512; ++frame) {
+        // A process-loopback packet is not guaranteed to be 512 frames.  The
+        // previous fixed-size write changed the stream's effective playback
+        // rate whenever WASAPI chose a different period, causing pitch shifts
+        // and FIFO underflows.  Keep the pipe clock equal to the capture clock.
+        UINT32 frames = 0;
+        for (size_t i = 0; i < captures.size(); ++i)
+            frames = std::max(frames, Capture(*captures[i], fifos[i], nullptr, stop.value));
+        if (!frames) continue;
+        pcm.resize(static_cast<size_t>(frames) * 2);
+        for (UINT32 frame = 0; frame < frames; ++frame) {
             Frame sum{0, 0};
             for (Fifo& fifo : fifos) { Frame item = fifo.Pop(); sum.left += item.left; sum.right += item.right; }
             pcm[frame * 2] = SafeSample(sum.left); pcm[frame * 2 + 1] = SafeSample(sum.right);

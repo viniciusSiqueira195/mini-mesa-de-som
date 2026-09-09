@@ -1008,6 +1008,10 @@ class PedalboardBackend:
                             process_source = ProcessAudioSource(
                                 self._np, tuple(process_pids), sample_rate
                             )
+                            # The helper emits PCM through a separate process.
+                            # Keep two callback blocks in reserve before mixing
+                            # it; take() remains non-blocking inside PortAudio.
+                            process_source.set_prebuffer_frames(block_size * 2)
                         stream = _MultiOutputSoundDeviceStream(
                             sounddevice=self._sd,
                             input_id=input_id,

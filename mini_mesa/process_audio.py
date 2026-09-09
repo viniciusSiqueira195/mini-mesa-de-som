@@ -98,6 +98,12 @@ class ProcessAudioSource:
         self._lock = threading.Lock()
         self._samples = deque()
         self._available = 0
+        # Process loopback and PortAudio run on separate clocks.  Do not start
+        # consuming a partial first packet: wait for this small jitter buffer
+        # instead, so the first scheduling wobble is not heard as a cut.
+        self._prebuffer_frames = 0
+        self._primed = True
+        self._underflow_count = 0
         self._stopped = threading.Event()
         args = [str(helper), "--capture", str(round(sample_rate)), *(str(pid) for pid in pids)]
         try:
@@ -129,7 +135,14 @@ class ProcessAudioSource:
         frame_bytes = 8
         pending = b""
         while not self._stopped.is_set():
-            chunk = self._process.stdout.read(8192)
+            # BufferedReader.read(8192) is allowed to wait for the whole
+            # request.  The native helper normally emits 4096-byte packets,
+            # which made this reader add a whole audio packet of latency and
+            # periodically starve the real-time callback.  read1() returns as
+            # soon as the pipe has a packet ready.
+            read_available = getattr(self._process.stdout, "read1", None)
+            chunk = (read_available(8192) if read_available is not None
+                     else self._process.stdout.read(8192))
             if not chunk:
                 return
             pending += chunk
@@ -146,10 +159,23 @@ class ProcessAudioSource:
                     dropped = self._samples.popleft()
                     self._available -= len(dropped)
 
+    def set_prebuffer_frames(self, frames: int) -> None:
+        """Gate playback until a small, non-blocking jitter buffer is ready."""
+
+        if frames < 0:
+            raise ValueError("O pré-buffer de processos não pode ser negativo.")
+        with self._lock:
+            self._prebuffer_frames = frames
+            self._primed = frames == 0
+
     def take(self, frames: int):
         output = self._np.zeros((frames, 2), dtype=self._np.float32)
         written = 0
         with self._lock:
+            if not self._primed:
+                if self._available < self._prebuffer_frames:
+                    return output
+                self._primed = True
             while written < frames and self._samples:
                 block = self._samples[0]
                 count = min(frames - written, len(block))
@@ -160,6 +186,8 @@ class ProcessAudioSource:
                     self._samples.popleft()
                 else:
                     self._samples[0] = block[count:]
+            if written < frames:
+                self._underflow_count += 1
         return output
 
     def close(self) -> None:

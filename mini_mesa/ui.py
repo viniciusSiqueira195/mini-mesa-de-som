@@ -1174,10 +1174,13 @@ class MainFrame(wx.Frame):
         devices.Add(output_label, 0, wx.LEFT | wx.RIGHT, 8)
         devices.Add(self.output_choice, 0, wx.ALL | wx.EXPAND, 8)
 
-        self.monitor_checkbox = EffectToggleButton(box_devices, label="Ativar &Ouvir retorno")
-        self.monitor_checkbox.SetName("Ouvir retorno do microfone processado")
+        # A native checkbox exposes its checked state to screen readers without
+        # replacing the control name with the confusing "Ativar/Desativar"
+        # action wording used by effect toggle buttons.
+        self.monitor_checkbox = wx.CheckBox(box_devices, label="&Ouvir retorno")
+        self.monitor_checkbox.SetName("Ouvir retorno")
         self.monitor_checkbox.SetValue(self.preferences.monitor_enabled)
-        self.monitor_checkbox.BindToggle(self._on_monitor_toggled)
+        self.monitor_checkbox.Bind(wx.EVT_CHECKBOX, self._on_monitor_toggled)
         devices.Add(self.monitor_checkbox, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 8)
 
         monitor_label = wx.StaticText(box_devices, label="Dispositivo de re&torno:")
@@ -2396,8 +2399,16 @@ class MainFrame(wx.Frame):
 
     def _on_process_selection_changed(self, event: wx.Event) -> None:
         self._save_preferences()
+        index = event.GetSelection()
+        if 0 <= index < len(self._process_items):
+            item = self._process_items[index]
+            state = "marcado" if self.process_list.IsChecked(index) else "desmarcado"
+            message = f"{item.label}: {state} para transmissão."
+        else:
+            message = "A seleção de programas foi atualizada."
         if self.engine.is_running:
-            self.SetStatusText("A seleção de programas será aplicada ao reativar a mesa.")
+            message += " A alteração será aplicada ao reativar a mesa."
+        self.SetStatusText(message)
         event.Skip()
 
     def _on_native_volume_changed(self, event: wx.Event) -> None:
