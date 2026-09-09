@@ -28,6 +28,7 @@ class SoundEffectInfo:
 @dataclass(slots=True)
 class _Playback:
     audio: np.ndarray
+    key: str | None = None
     position: int = 0
 
 
@@ -105,7 +106,9 @@ class SoundboardMixer:
         if target_rate <= 0:
             raise ValueError("A taxa de amostragem deve ser positiva.")
         audio, source_rate = _read_wave(self._effect_path(effect_id))
-        self._append(_resample(audio, source_rate, target_rate))
+        self._append(
+            _resample(audio, source_rate, target_rate), playback_key=effect_id
+        )
         return effect
 
     def play(self, sound_id_or_path: str) -> bool:
@@ -119,7 +122,7 @@ class SoundboardMixer:
                 prepared = np.column_stack((prepared, prepared))
             if prepared.ndim != 2 or prepared.shape[1] != 2 or prepared.size == 0:
                 return False
-            self._append(prepared.copy())
+            self._append(prepared.copy(), playback_key=key.lower())
             return True
         if any(effect.effect_id == key.lower() for effect in _EFFECTS):
             try:
@@ -134,7 +137,7 @@ class SoundboardMixer:
             return False
         if prepared.size == 0:
             return False
-        self._append(prepared)
+        self._append(prepared, playback_key=str(Path(key).resolve()))
         return True
 
     def stop_all(self) -> None:
@@ -173,9 +176,19 @@ class SoundboardMixer:
         if rendered is not None:
             target_mono += rendered
 
-    def _append(self, audio: np.ndarray) -> None:
+    def _append(self, audio: np.ndarray, *, playback_key: str | None = None) -> None:
         with self._lock:
-            self._active.append(_Playback(audio.astype(np.float32, copy=False)))
+            if playback_key is not None:
+                # Re-triggering a shortcut restarts that sound rather than
+                # layering a second copy over the one already playing.
+                self._active = [
+                    playback
+                    for playback in self._active
+                    if playback.key != playback_key
+                ]
+            self._active.append(
+                _Playback(audio.astype(np.float32, copy=False), key=playback_key)
+            )
             if len(self._active) > _MAX_SIMULTANEOUS_PLAYBACKS:
                 del self._active[:-_MAX_SIMULTANEOUS_PLAYBACKS]
 

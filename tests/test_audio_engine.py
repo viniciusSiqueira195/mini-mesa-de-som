@@ -89,6 +89,7 @@ class FakeBackend:
         self.preview_stops = 0
         self.deactivate_calls = 0
         self.created_process_pids: tuple[int, ...] = ()
+        self.updated_process_pids: list[tuple[int, ...]] = []
 
     def input_devices(self) -> tuple[str, ...]:
         return ("FIFINE AM8", "Zeus X")
@@ -126,6 +127,9 @@ class FakeBackend:
 
     def update_soundboard(self, settings: SoundboardSettings) -> None:
         self.soundboard_settings = settings
+
+    def update_processes(self, process_pids) -> None:
+        self.updated_process_pids.append(tuple(process_pids))
 
     def play_sound(self, sound_id_or_path: str) -> bool:
         self.played_sounds.append(sound_id_or_path)
@@ -371,6 +375,42 @@ class MultiOutputStreamTests(unittest.TestCase):
         try:
             stream._on_input(np.zeros((4, 1), dtype=np.float32), 4, None, None)
             np.testing.assert_allclose(stream._primary_output._chunks[-1], 0.1)
+        finally:
+            stream.close()
+
+    def test_process_only_recording_without_selected_programs_writes_silence(self) -> None:
+        recorder = Mock(is_recording=True, mode="processes")
+        stream = _MultiOutputSoundDeviceStream(
+            sounddevice=FakeSoundDevice(), input_id=1, outputs=[(2, 2)],
+            sample_rate=48_000, input_channels=1, block_size=4,
+            processor=lambda _samples, frames: np.full((frames, 2), 0.4, dtype=np.float32),
+        )
+        stream.set_recorder(recorder)
+        try:
+            stream._on_input(np.zeros((4, 1), dtype=np.float32), 4, None, None)
+            np.testing.assert_array_equal(
+                recorder.push.call_args.args[0], np.zeros((4, 2), dtype=np.float32)
+            )
+        finally:
+            stream.close()
+
+    def test_replacing_process_source_keeps_stream_running(self) -> None:
+        previous = Mock()
+        replacement = Mock()
+        replacement.take.return_value = np.full((4, 2), 0.25, dtype=np.float32)
+        stream = _MultiOutputSoundDeviceStream(
+            sounddevice=FakeSoundDevice(), input_id=1, outputs=[(2, 2)],
+            sample_rate=48_000, input_channels=1, block_size=4,
+            processor=lambda _samples, frames: np.zeros((frames, 2), dtype=np.float32),
+            process_source=previous,
+        )
+        try:
+            stream.replace_process_source(replacement)
+            stream._on_input(np.zeros((4, 1), dtype=np.float32), 4, None, None)
+
+            previous.close.assert_called_once_with()
+            replacement.take.assert_called_once_with(4)
+            np.testing.assert_allclose(stream._primary_output._chunks[-1], 0.25)
         finally:
             stream.close()
 
@@ -938,7 +978,9 @@ class PedalboardProcessingTests(unittest.TestCase):
         source_constructor.assert_called_once_with(
             backend._np, (123, 456), 44_100.0
         )
-        source_constructor.return_value.set_prebuffer_frames.assert_called_once_with(1024)
+        source_constructor.return_value.set_prebuffer_frames.assert_called_once_with(4410)
+
+
         self.assertIs(
             stream_constructor.call_args.kwargs["process_source"],
             source_constructor.return_value,

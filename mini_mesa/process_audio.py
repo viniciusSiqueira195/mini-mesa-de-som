@@ -168,6 +168,13 @@ class ProcessAudioSource:
             self._prebuffer_frames = frames
             self._primed = frames == 0
 
+    @property
+    def underflow_count(self) -> int:
+        """Number of times the real-time mixer received too little process audio."""
+
+        with self._lock:
+            return self._underflow_count
+
     def take(self, frames: int):
         output = self._np.zeros((frames, 2), dtype=self._np.float32)
         written = 0
@@ -189,6 +196,8 @@ class ProcessAudioSource:
             if written < frames:
                 self._underflow_count += 1
         return output
+
+
 
     def close(self) -> None:
         self._stopped.set()

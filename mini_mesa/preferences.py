@@ -11,6 +11,9 @@ from .settings import (
     VALID_AMBIENCES,
     VALID_CREATIVE_PRESETS,
     VALID_MODULATIONS,
+    VALID_RECORDING_BITRATES,
+    VALID_RECORDING_FORMATS,
+    VALID_RECORDING_MODES,
     VALID_VOICE_PRESETS,
 )
 
@@ -114,6 +117,11 @@ class AppPreferences:
     soundboard_volume_percent: int = 80
     soundboard_ducking_enabled: bool = False
     soundboard_ducking_percent: int = 60
+    recording_format: str = "mp3"
+    recording_bitrate_kbps: int = 192
+    recording_mode: str = "both"
+    recording_custom_filename: str = ""
+    recording_folder: str = ""
     personal_sounds: tuple[PersonalSound, ...] = ()
     selected_sound_page: int = 0
     sound_page_names: tuple[str, ...] = tuple(
@@ -343,6 +351,17 @@ class AppPreferences:
             soundboard_ducking_percent=percent_value(
                 "soundboard_ducking_percent", defaults.soundboard_ducking_percent
             ),
+            recording_format=text_value("recording_format", defaults.recording_format)
+            if text_value("recording_format", defaults.recording_format) in VALID_RECORDING_FORMATS
+            else defaults.recording_format,
+            recording_bitrate_kbps=data.get("recording_bitrate_kbps", defaults.recording_bitrate_kbps)
+            if not isinstance(data.get("recording_bitrate_kbps"), bool) and data.get("recording_bitrate_kbps") in VALID_RECORDING_BITRATES
+            else defaults.recording_bitrate_kbps,
+            recording_mode=text_value("recording_mode", defaults.recording_mode)
+            if text_value("recording_mode", defaults.recording_mode) in VALID_RECORDING_MODES
+            else defaults.recording_mode,
+            recording_custom_filename=text_value("recording_custom_filename", defaults.recording_custom_filename),
+            recording_folder=text_value("recording_folder", defaults.recording_folder),
         )
 
 
