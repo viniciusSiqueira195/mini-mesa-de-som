@@ -11,13 +11,13 @@ um cabo de áudio virtual usado pelo Discord, TeamTalk, WhatsApp ou outro progra
 
 ## Versão atual
 
-A versão **1.2.3** estabiliza a transmissão do áudio de programas sem desativar
-reverb, modificadores de voz, limpeza, áudio 3D ou o Painel de efeitos. Ela também
-mantém volumes independentes e a importação de vários arquivos.
+A versão **1.2.4** adiciona gravação em WAV, MP3 e OGG, permite alterar os
+programas transmitidos com a mesa ativa e faz o mesmo efeito sonoro reiniciar
+ao repetir seu atalho. A gravação começa com um beep discreto de confirmação.
 
 ## Instalação rápida
 
-Baixe `MiniMesaDeSom-Setup-1.2.3.exe` na página da
+Baixe `MiniMesaDeSom-Setup-1.2.4.exe` na página da
 [versão mais recente](https://github.com/viniciusSiqueira195/mini-mesa-de-som/releases/latest)
 e execute o instalador. Ele pode instalar opcionalmente o VB-CABLE oficial,
 necessário para enviar o áudio processado ao TeamTalk, Discord ou outro programa.
@@ -161,7 +161,7 @@ Depois execute:
 O script roda os testes, empacota o programa com PyInstaller, executa um autoteste
 do executável sem o Python de desenvolvimento no PATH e baixa os pacotes
 oficiais do VB-CABLE e AudioDeviceCmdlets com verificação SHA-256 e gera
-`installer-output\MiniMesaDeSom-Setup-1.2.3.exe`. O aplicativo é empacotado em
+`installer-output\MiniMesaDeSom-Setup-1.2.4.exe`. O aplicativo é empacotado em
 uma pasta interna para dar mais estabilidade às bibliotecas nativas de áudio;
 para o usuário, a entrega continua sendo um único instalador.
 
@@ -199,6 +199,22 @@ Também é possível iniciar a verificação manualmente em **Ajuda > Verificar
 atualizações**. O atualizador preserva as preferências e não reinstala o driver
 VB-CABLE durante atualizações comuns.
 
+## Gravação de áudio
+
+Ative a mesa e abra a guia **Gravar**. Escolha WAV, MP3 ou OGG, confira as opções
+de qualidade e selecione a pasta de destino. O nome é opcional: em branco, será
+gerado com data e horário. Você pode gravar apenas sua voz com os efeitos, apenas
+os programas marcados para transmissão ou ambos.
+
+Pressione `F8` com a Mini Mesa em foco, ou use **Iniciar gravação**. Um beep discreto
+confirma o início, mesmo com os avisos gerais desativados. Pressione `F8` novamente
+para parar; a guia informa o arquivo salvo e a duração. Se a mesa estiver desligada,
+um aviso pede que ela seja ativada antes da gravação.
+
+Na guia **Dispositivos**, programas podem ser marcados e desmarcados com a mesa
+ativa. As alterações são aplicadas imediatamente. Use **Atualizar programas**
+quando um aplicativo recém-aberto ainda não aparecer.
+
 ## Configuração do cabo virtual
 
 Com o VB-CABLE como exemplo:
@@ -213,13 +229,14 @@ Com o VB-CABLE como exemplo:
 
 ## Organização por guias
 
-A janela reúne os controles em cinco guias:
+A janela reúne os controles em seis guias:
 
 - **Dispositivos**: microfone, saída virtual e retorno.
 - **Voz e efeitos**: modificador de voz, reverb, estilos, modulações, ambientes e eco.
 - **Limpeza da voz**: compressor, equalizador, filtros e redução de ruído.
 - **Áudio 3D**: posição e movimento espacial.
 - **Painel de efeitos**: adicionar, renomear, substituir, remover e reproduzir arquivos pessoais, com volume e ducking.
+- **Gravar**: formato, qualidade, modo de captura, nome e pasta do arquivo, com início e parada por `F8`.
 
 Use `Ctrl+Tab` para avançar e `Ctrl+Shift+Tab` para voltar entre as guias.
 O foco fica no seletor de guias; `Tab` entra nos controles da guia selecionada.

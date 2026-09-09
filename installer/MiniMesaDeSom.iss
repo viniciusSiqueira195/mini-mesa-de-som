@@ -1,5 +1,5 @@
 #define AppName "Mini Mesa de Som"
-#define AppVersion "1.2.3"
+#define AppVersion "1.2.4"
 #define AppPublisher "Vinicius Siqueira"
 #define AppURL "https://github.com/viniciusSiqueira195/mini-mesa-de-som"
 #define AppExeName "MiniMesaDeSom.exe"
@@ -15,7 +15,7 @@ AppPublisher={#AppPublisher}
 AppPublisherURL={#AppURL}
 AppSupportURL={#AppURL}
 AppUpdatesURL={#AppURL}
-VersionInfoVersion=1.2.3.0
+VersionInfoVersion=1.2.4.0
 VersionInfoCompany={#AppPublisher}
 VersionInfoDescription=Mesa de som virtual acessível com efeitos em tempo real
 VersionInfoProductName={#AppName}

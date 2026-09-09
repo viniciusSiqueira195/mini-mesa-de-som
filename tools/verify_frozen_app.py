@@ -40,6 +40,8 @@ def verify(executable: Path, result_path: Path) -> dict:
         "interface",
         "help",
         "release_notes",
+        "recording",
+        "recording_beep",
         "user_features",
     ):
         if result.get(feature) is not True:

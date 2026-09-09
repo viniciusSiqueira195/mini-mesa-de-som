@@ -1,5 +1,54 @@
 # Histórico de versões
 
+## 1.2.4 — 2026-09-09
+
+A Mini Mesa de Som agora grava suas transmissões em arquivo e permite mudar os
+programas transmitidos sem interromper a mesa. Esta versão também melhora a
+mistura de vários programas e corrige a repetição de um mesmo efeito sonoro.
+
+### Nova guia Gravar
+
+- Salve suas gravações em WAV, MP3 ou OGG. Na guia Gravar, escolha o formato,
+  confira as opções de qualidade e selecione a pasta onde deseja guardar os arquivos.
+- São três modos de captura: apenas sua voz com os efeitos aplicados; apenas o
+  áudio dos programas marcados para transmissão; ou ambos, voz e programas juntos.
+  A seleção de programas determina quais aplicativos entram na gravação: não é
+  uma captura geral de todos os sons do computador.
+- O nome do arquivo é opcional. Se deixar o campo vazio, a Mini Mesa cria um nome
+  com a data e o horário da gravação, incluindo os segundos.
+- Use o botão Iniciar gravação ou pressione F8 com a Mini Mesa em foco. O mesmo
+  atalho encerra a gravação. O estado e o tempo gravado aparecem na própria guia;
+  ao parar, uma mensagem informa o nome do arquivo salvo e sua duração.
+- Um beep curto e discreto confirma que a gravação começou. Essa confirmação
+  funciona mesmo quando os avisos sonoros gerais estão desativados.
+- É preciso iniciar a mesa antes de gravar. Se ela estiver desligada, o programa
+  avisa para iniciá-la, em vez de começar uma gravação sem receber áudio.
+
+### Programas transmitidos: ajustes sem parar a mesa
+
+- Na guia Dispositivos, escolha o microfone, a saída de áudio e, se desejar, o
+  retorno. Marque os programas que quer transmitir, como NVDA ou navegador, e
+  clique em Ativar mesa. Depois, abra a guia Gravar para salvar o áudio em arquivo.
+- Agora você pode marcar ou desmarcar programas com a mesa em funcionamento.
+  A mudança é aplicada na hora, sem precisar desativar e reativar a mesa.
+- Se abriu um programa e ele ainda não aparece, use Atualizar programas
+  e marque-o. Desmarcar um programa retira seu áudio da transmissão e mantém a
+  mesa funcionando.
+- Os itens da lista identificam o programa e seu estado, marcado ou desmarcado,
+  facilitando a conferência com o leitor de telas. Ao alterar a seleção, a
+  mensagem de estado informa se a mudança foi aplicada.
+- A mistura simultânea de vários programas recebeu ajustes para reduzir cortes
+  no áudio durante a transmissão e a gravação.
+
+### Efeitos sonoros
+
+- Ao acionar novamente um efeito que já está tocando, ele volta ao início.
+  Repetir o mesmo atalho deixa de acumular várias cópias daquele som.
+- Efeitos diferentes continuam podendo tocar ao mesmo tempo.
+
+Agradecemos ao Paulo Santesso pelas implementações desta versão e a todos que
+ajudam testando e relatando problemas. Sugestões e relatos de bugs são bem-vindos!
+
 ## 1.2.3 — 2026-09-09
 
 Esta atualização reúne as correções mais recentes e relembra as novidades das

@@ -32,6 +32,7 @@ class PackagingTests(unittest.TestCase):
             result_path = root / "result.json"
             result = dict(ok=True, pedalboard=True, rnnoise=True, hrtf=True,
                           interface=True, help=True, release_notes=True,
+                          recording=True, recording_beep=True,
                           user_features=True, codecs=["wav", "mp3", "flac", "ogg"])
 
             def run(command, **kwargs):

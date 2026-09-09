@@ -21,6 +21,8 @@ def _self_test(result_path: Path) -> int:
         from mini_mesa import ui
         from mini_mesa.preferences import AppPreferences, PersonalSound, PreferencesStore
         from mini_mesa.soundboard import SoundboardMixer
+        from mini_mesa.recorder import AudioRecorder
+        from mini_mesa.settings import RecordingSettings
         from mini_mesa.audio_engine import AudioEngine, PedalboardBackend
         from mini_mesa.noise_reduction import RNNOISE_FRAME_SIZE, RNNoiseReducer
         from mini_mesa.settings import SpatialSettings
@@ -55,6 +57,22 @@ def _self_test(result_path: Path) -> int:
             raise RuntimeError("A ajuda ou suas extensões Markdown não foram empacotadas.")
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            for extension in ("wav", "mp3", "ogg"):
+                recorder = AudioRecorder(RecordingSettings(
+                    format=extension, folder=str(root), custom_filename=f"recording.{extension}",
+                ))
+                samples = np.column_stack([
+                    np.sin(np.arange(4800) * 0.1).astype(np.float32) * 0.1,
+                ] * 2)
+                recorder.push(samples)
+                path, duration = recorder.stop()
+                recorded, rate = sf.read(path)
+                if rate != 48000 or duration <= 0 or not np.any(recorded):
+                    raise RuntimeError(f"A gravação {extension} não funciona no pacote.")
+            beep = Path(ui.__file__).parent / "assets" / "feedback" / "recording_start.wav"
+            beep_audio, beep_rate = sf.read(beep)
+            if beep_rate != 44100 or not np.any(beep_audio):
+                raise RuntimeError("O beep de gravação não foi empacotado corretamente.")
             for extension in ("wav", "flac", "ogg", "mp3"):
                 path = root / f"probe.{extension}"
                 sf.write(path, np.sin(np.arange(4800) * 0.1).astype(np.float32) * 0.1, 48000)
@@ -102,6 +120,8 @@ def _self_test(result_path: Path) -> int:
             interface=True,
             help=True,
             release_notes=True,
+            recording=True,
+            recording_beep=True,
             user_features=True,
             codecs=["wav", "mp3", "flac", "ogg"],
             device_inventory=[dict(device) for device in sd.query_devices()],

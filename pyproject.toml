@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mini-mesa-de-som"
-version = "1.2.3"
+version = "1.2.4"
 description = "Mesa de som virtual acessível com efeitos de voz em tempo real."
 readme = "README.md"
 requires-python = ">=3.11"
