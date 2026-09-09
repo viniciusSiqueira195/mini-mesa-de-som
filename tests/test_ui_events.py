@@ -10,8 +10,9 @@ from mini_mesa import ui
 
 
 class _FakeEvent:
-    def __init__(self, key_code: int = 0) -> None:
+    def __init__(self, key_code: int = 0, selection: int = -1) -> None:
         self.key_code = key_code
+        self.selection = selection
         self.skipped = False
 
     def Skip(self) -> None:
@@ -19,6 +20,9 @@ class _FakeEvent:
 
     def GetKeyCode(self) -> int:
         return self.key_code
+
+    def GetSelection(self) -> int:
+        return self.selection
 
 
 class _FakeControl:
@@ -53,6 +57,40 @@ class VoiceControlTests(unittest.TestCase):
             ui.MainFrame._update_voice_controls(frame)
             self.assertEqual(frame.voice_preset_choice.enabled, enabled)
             self.assertEqual(frame.voice_pitch.enabled, enabled)
+
+
+class ProcessSelectionAnnouncementTests(unittest.TestCase):
+    @staticmethod
+    def _frame(*, checked: bool, running: bool):
+        messages: list[str] = []
+        return types.SimpleNamespace(
+            _process_items=(types.SimpleNamespace(pid=42, label="player.exe (PID 42)"),),
+            process_list=types.SimpleNamespace(IsChecked=lambda index: checked),
+            engine=types.SimpleNamespace(is_running=running),
+            _save_preferences=lambda: None,
+            SetStatusText=messages.append,
+            messages=messages,
+        )
+
+    def test_checked_program_announcement_identifies_the_process(self) -> None:
+        frame = self._frame(checked=True, running=False)
+        event = _FakeEvent(selection=0)
+
+        ui.MainFrame._on_process_selection_changed(frame, event)
+
+        self.assertEqual(frame.messages, ["player.exe (PID 42): marcado para transmissão."])
+        self.assertTrue(event.skipped)
+
+    def test_unchecked_program_says_it_applies_on_next_activation(self) -> None:
+        frame = self._frame(checked=False, running=True)
+
+        ui.MainFrame._on_process_selection_changed(frame, _FakeEvent(selection=0))
+
+        self.assertEqual(
+            frame.messages,
+            ["player.exe (PID 42): desmarcado para transmissão. "
+             "A alteração será aplicada ao reativar a mesa."],
+        )
 
 
 class CreativeChoiceEventTests(unittest.TestCase):
