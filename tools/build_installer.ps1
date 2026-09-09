@@ -29,6 +29,11 @@ try {
         }
     }
 
+    & .\tools\build_process_capture.ps1
+    if ($LASTEXITCODE -ne 0) {
+        throw "O componente de captura de programas não foi compilado."
+    }
+
     & $python -m PyInstaller --clean --noconfirm .\MiniMesaDeSom.spec
     if ($LASTEXITCODE -ne 0) {
         throw "O PyInstaller não conseguiu gerar o aplicativo."

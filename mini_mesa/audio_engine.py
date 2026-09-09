@@ -26,6 +26,7 @@ from .soundboard import (
     _resample,
 )
 from .spatial_audio import HRTFSpatializer
+from .process_audio import ProcessAudioSource
 
 
 _HOST_API_RANKS = {
@@ -738,6 +739,7 @@ class AudioBackend(Protocol):
         monitor_output: str | None = None,
         *,
         monitor_voice: bool = True,
+        process_pids: Sequence[int] = (),
     ) -> AudioStream: ...
 
     def update_reverb(self, settings: ReverbSettings) -> None: ...
@@ -936,6 +938,7 @@ class PedalboardBackend:
         monitor_output: str | None = None,
         *,
         monitor_voice: bool = True,
+        process_pids: Sequence[int] = (),
     ) -> AudioStream:
         try:
             (
@@ -995,7 +998,12 @@ class PedalboardBackend:
                 block_sizes = _stream_block_sizes(monitor_output is not None)
                 for block_size in block_sizes:
                     stream = None
+                    process_source = None
                     try:
+                        if process_pids:
+                            process_source = ProcessAudioSource(
+                                self._np, tuple(process_pids), sample_rate
+                            )
                         stream = _MultiOutputSoundDeviceStream(
                             sounddevice=self._sd,
                             input_id=input_id,
@@ -1006,6 +1014,7 @@ class PedalboardBackend:
                             processor=self._process_audio,
                             effects_processor=lambda: self._effects_monitor_audio,
                             monitor_voice=monitor_voice,
+                            process_source=process_source,
                         )
                         # Construction alone does not prove that a Windows host
                         # API can start the endpoint. Validate every route so an
@@ -1015,6 +1024,8 @@ class PedalboardBackend:
                     except Exception as exc:
                         if stream is not None:
                             stream.close()
+                        elif process_source is not None:
+                            process_source.close()
                         last_error = exc
                         continue
 
@@ -1891,11 +1902,13 @@ class _MultiOutputSoundDeviceStream:
         processor: Callable,
         effects_processor: Callable | None = None,
         monitor_voice: bool = True,
+        process_source=None,
     ) -> None:
         self._sd = sounddevice
         self._processor = processor
         self._effects_processor = effects_processor
         self._monitor_voice = monitor_voice
+        self._process_source = process_source
         self._sample_rate = sample_rate
         self._block_size = block_size
         self._stop_event = threading.Event()
@@ -2004,6 +2017,10 @@ class _MultiOutputSoundDeviceStream:
             return
         try:
             processed = self._processor(indata, frames)
+            if self._process_source is not None:
+                processed = (
+                    processed + self._process_source.take(frames)
+                ).clip(-1.0, 1.0)
         except Exception as exc:
             self._error = exc
             self._stop_event.set()
@@ -2110,6 +2127,9 @@ class _MultiOutputSoundDeviceStream:
                         stream.close()
                 except Exception:
                     pass
+            if self._process_source is not None:
+                self._process_source.close()
+                self._process_source = None
 
     def _abort_streams(self) -> None:
         with self._outputs_lock:
@@ -2253,11 +2273,15 @@ class AudioEngine:
         monitor_output: str | None = None,
         *,
         effects_output: str | None = None,
+        process_pids: Sequence[int] = (),
     ) -> None:
         input_device = input_device.strip()
         output_device = output_device.strip()
         monitor_output = monitor_output.strip() if monitor_output else None
         effects_output = effects_output.strip() if effects_output else None
+        process_pids = tuple(
+            sorted({int(pid) for pid in process_pids if int(pid) > 0})
+        )
         local_output = monitor_output or effects_output
         if not input_device:
             raise ValueError("Selecione um microfone de entrada.")
@@ -2285,12 +2309,18 @@ class AudioEngine:
             self._backend.update_pro_audio(self._pro_audio_settings)
             self._backend.update_soundboard(self._soundboard_settings)
             try:
+                kwargs = (
+                    {"monitor_voice": monitor_output is not None}
+                    if effects_output else {}
+                )
+                if process_pids:
+                    kwargs["process_pids"] = process_pids
                 stream = self._backend.create_stream(
                     input_device,
                     output_device,
                     self._settings,
                     local_output,
-                    **({"monitor_voice": monitor_output is not None} if effects_output else {}),
+                    **kwargs,
                 )
             except Exception:
                 deactivate = getattr(self._backend, "deactivate", None)

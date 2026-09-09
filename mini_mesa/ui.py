@@ -15,6 +15,7 @@ from .global_hotkeys import GlobalHotkeyManager, modifier_label
 from .release_notes import load_release_notes
 from .audio_engine import AudioDependencyError, AudioEngine, match_device_label
 from .preferences import AppPreferences, PersonalSound, PreferencesStore
+from .process_audio import list_candidate_processes
 from .soundboard import SoundEffectError, validate_custom_audio
 from .user_features import ProfileStore, diagnostic_text, export_backup, import_backup
 from .settings import (
@@ -1119,6 +1120,7 @@ class MainFrame(wx.Frame):
         self._update_progress_dialog: wx.ProgressDialog | None = None
         self._update_cancel_event: threading.Event | None = None
         self._creative_update_queued = False
+        self._process_items = ()
 
         panel = wx.Panel(self)
         self.notebook = wx.Notebook(panel, style=wx.NB_TOP | wx.NB_MULTILINE)
@@ -1194,6 +1196,54 @@ class MainFrame(wx.Frame):
         self.refresh_button.Bind(wx.EVT_BUTTON, self._on_refresh)
         devices.Add(self.refresh_button, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 8)
         devices_root.Add(devices, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
+
+        process_box = wx.StaticBoxSizer(
+            wx.VERTICAL, devices_page, "Programas enviados na transmissão"
+        )
+        process_panel = process_box.GetStaticBox()
+        process_help = wx.StaticText(
+            process_panel,
+            label=("Marque os programas cujo áudio será misturado ao microfone. "
+                   "A alteração é aplicada na próxima ativação da mesa."),
+        )
+        process_help.Wrap(540)
+        self.process_list = wx.CheckListBox(process_panel)
+        self.process_list.SetName("Programas para transmitir")
+        self.process_list.SetMinSize((-1, 150))
+        self.process_list.Bind(
+            wx.EVT_CHECKLISTBOX, self._on_process_selection_changed
+        )
+        self.refresh_processes_button = wx.Button(
+            process_panel, label="Atualizar programas"
+        )
+        _set_button_accessible_name(
+            self.refresh_processes_button, "Atualizar programas em execução"
+        )
+        self.refresh_processes_button.Bind(wx.EVT_BUTTON, self._on_refresh_processes)
+        process_box.Add(process_help, 0, wx.ALL | wx.EXPAND, 8)
+        process_box.Add(self.process_list, 1, wx.LEFT | wx.RIGHT | wx.EXPAND, 8)
+        process_box.Add(self.refresh_processes_button, 0, wx.ALL, 8)
+        devices_root.Add(process_box, 1, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
+
+        volumes = wx.StaticBoxSizer(wx.VERTICAL, devices_page, "Volumes")
+        volume_panel = volumes.GetStaticBox()
+        self.microphone_volume = wx.Slider(
+            volume_panel, value=self.preferences.microphone_volume_percent,
+            minValue=0, maxValue=200, style=wx.SL_HORIZONTAL | wx.SL_LABELS,
+        )
+        self.process_volume = wx.Slider(
+            volume_panel, value=self.preferences.process_volume_percent,
+            minValue=0, maxValue=200, style=wx.SL_HORIZONTAL | wx.SL_LABELS,
+        )
+        _set_slider_accessible_name(self.microphone_volume, "Volume do microfone")
+        _set_slider_accessible_name(self.process_volume, "Volume dos programas")
+        self.microphone_volume.Bind(wx.EVT_SLIDER, self._on_native_volume_changed)
+        self.process_volume.Bind(wx.EVT_SLIDER, self._on_native_volume_changed)
+        volumes.Add(wx.StaticText(volume_panel, label="Volume do &microfone:"), 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
+        volumes.Add(self.microphone_volume, 0, wx.ALL | wx.EXPAND, 8)
+        volumes.Add(wx.StaticText(volume_panel, label="Volume dos &programas:"), 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
+        volumes.Add(self.process_volume, 0, wx.ALL | wx.EXPAND, 8)
+        devices_root.Add(volumes, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
 
         effect = wx.StaticBoxSizer(wx.VERTICAL, voice_page, "Reverb")
         box_effect = effect.GetStaticBox()
@@ -1791,6 +1841,7 @@ class MainFrame(wx.Frame):
         self._apply_global_hotkeys(show_error=False)
 
         self._refresh_devices()
+        self._refresh_processes()
         self.Centre()
         self.input_choice.SetFocus()
         if not self.preferences.welcome_shown or self.preferences.last_seen_news_version != __version__:
@@ -2338,6 +2389,40 @@ class MainFrame(wx.Frame):
 
     def _on_refresh(self, _event: wx.Event) -> None:
         self._refresh_devices()
+        self._refresh_processes()
+
+    def _on_refresh_processes(self, _event: wx.Event) -> None:
+        self._refresh_processes()
+
+    def _on_process_selection_changed(self, event: wx.Event) -> None:
+        self._save_preferences()
+        if self.engine.is_running:
+            self.SetStatusText("A seleção de programas será aplicada ao reativar a mesa.")
+        event.Skip()
+
+    def _on_native_volume_changed(self, event: wx.Event) -> None:
+        setter = getattr(self.engine, "set_volumes", None)
+        if setter is not None:
+            setter(self.microphone_volume.GetValue() / 100.0, self.process_volume.GetValue() / 100.0)
+        self._save_preferences()
+        event.Skip()
+
+    def _refresh_processes(self) -> None:
+        selected = (
+            set(self._selected_process_pids())
+            or set(self.preferences.transmitted_processes)
+        )
+        self._process_items = list_candidate_processes()
+        self.process_list.Set([item.label for item in self._process_items])
+        for index, item in enumerate(self._process_items):
+            self.process_list.Check(index, item.pid in selected)
+
+    def _selected_process_pids(self) -> tuple[int, ...]:
+        return tuple(
+            self._process_items[index].pid
+            for index in self.process_list.GetCheckedItems()
+            if 0 <= index < len(self._process_items)
+        )
 
     def _refresh_devices(self) -> None:
         selected_input = (
@@ -2465,6 +2550,9 @@ class MainFrame(wx.Frame):
             last_seen_news_version=self.preferences.last_seen_news_version,
             input_device=self.input_choice.GetStringSelection(),
             output_device=self.output_choice.GetStringSelection(),
+            transmitted_processes=self._selected_process_pids(),
+            microphone_volume_percent=self.microphone_volume.GetValue(),
+            process_volume_percent=self.process_volume.GetValue(),
             monitor_enabled=self.monitor_checkbox.GetValue(),
             monitor_device=self.monitor_choice.GetStringSelection(),
             reverb_enabled=self.reverb_checkbox.GetValue(),
@@ -2515,7 +2603,10 @@ class MainFrame(wx.Frame):
             self.engine.stop()
         self.preferences = preferences
         self._refresh_devices()
+        self._refresh_processes()
         self.monitor_checkbox.SetValue(preferences.monitor_enabled)
+        self.microphone_volume.SetValue(preferences.microphone_volume_percent)
+        self.process_volume.SetValue(preferences.process_volume_percent)
         self.reverb_checkbox.SetValue(preferences.reverb_enabled)
         self.reverb_level.SetValue(preferences.reverb_level)
         self.reverb_level.Enable(preferences.reverb_enabled)
@@ -2841,6 +2932,8 @@ class MainFrame(wx.Frame):
         self.monitor_checkbox.Enable()
         self.monitor_choice.Enable()
         self.refresh_button.Enable(enabled)
+        self.process_list.Enable(enabled)
+        self.refresh_processes_button.Enable(enabled)
         self.noise_reduction_checkbox.Enable()
 
     def _selected_monitor_output(self) -> str | None:
@@ -2857,6 +2950,9 @@ class MainFrame(wx.Frame):
         return self.preferences.monitor_device or None
 
     def _start_selected_route(self) -> None:
+        setter = getattr(self.engine, "set_volumes", None)
+        if setter is not None:
+            setter(self.microphone_volume.GetValue() / 100.0, self.process_volume.GetValue() / 100.0)
         self.engine.update_noise_reduction(
             self.noise_reduction_checkbox.GetValue()
         )
@@ -2866,14 +2962,30 @@ class MainFrame(wx.Frame):
         self.engine.update_pro_audio_settings(self._current_pro_audio_settings())
         self.engine.update_soundboard_settings(self._soundboard_settings)
         self.engine.update_spatial(self._current_spatial_settings())
+        process_pids = self._selected_process_pids()
+        start_options = {
+            "effects_output": self.monitor_choice.GetStringSelection() or None,
+        }
+        if process_pids:
+            start_options["process_pids"] = process_pids
         self.engine.start(
             self.input_choice.GetStringSelection(),
             self.output_choice.GetStringSelection(),
             self._selected_monitor_output(),
-            effects_output=self.monitor_choice.GetStringSelection() or None,
+            **start_options,
         )
 
     def _show_running_state(self) -> None:
+        if getattr(self.engine, "native_only", False):
+            selected = len(self._selected_process_pids())
+            self.status.ChangeValue(
+                "Mesa ativa. O microfone e os programas selecionados estão sendo "
+                "enviados para a saída virtual sem efeitos."
+            )
+            self.SetStatusText(
+                f"Mesa ativa: microfone e {selected} programa(s) selecionado(s)."
+            )
+            return
         monitoring = self.monitor_checkbox.GetValue()
         effects = []
         if self.noise_reduction_checkbox.GetValue():
@@ -3179,7 +3291,8 @@ def run() -> int:
     app = wx.App(False)
     app.SetAppName("Mini Mesa de Som")
     try:
-        engine = AudioEngine()
+        from .native_engine import NativeAudioEngine
+        engine = NativeAudioEngine()
     except AudioDependencyError as exc:
         wx.MessageBox(str(exc), "Mini Mesa de Som", wx.OK | wx.ICON_ERROR)
         return 1
