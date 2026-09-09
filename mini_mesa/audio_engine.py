@@ -752,6 +752,8 @@ class AudioBackend(Protocol):
 
     def update_soundboard(self, settings: SoundboardSettings) -> None: ...
 
+    def set_volumes(self, microphone: float, processes: float) -> None: ...
+
     def play_sound(self, sound_id_or_path: str) -> bool: ...
 
     def preview_sound(self, path: str, output_device: str) -> None: ...
@@ -851,6 +853,8 @@ class PedalboardBackend:
         self._input_ids: dict[str, list[tuple[int, str]]] = {}
         self._output_ids: dict[str, list[tuple[int, str]]] = {}
         self._input_level = 0.0
+        self._microphone_volume = 1.0
+        self._process_volume = 1.0
 
     def input_devices(self) -> Sequence[str]:
         self._refresh_devices()
@@ -1015,6 +1019,7 @@ class PedalboardBackend:
                             effects_processor=lambda: self._effects_monitor_audio,
                             monitor_voice=monitor_voice,
                             process_source=process_source,
+                            process_gain=lambda: self._process_volume,
                         )
                         # Construction alone does not prove that a Windows host
                         # API can start the endpoint. Validate every route so an
@@ -1153,6 +1158,7 @@ class PedalboardBackend:
             self._input_level = min(
                 1.0, float(self._np.sqrt(self._np.mean(mono_input * mono_input)))
             )
+            mono_input = mono_input * getattr(self, "_microphone_volume", 1.0)
             soundboard_audio = None
             soundboard_duck = 1.0
             soundboard = getattr(self, "_soundboard", None)
@@ -1254,6 +1260,11 @@ class PedalboardBackend:
             self._soundboard_settings = settings
             if self._soundboard is not None:
                 self._soundboard.set_volume_percent(settings.volume_percent)
+
+    def set_volumes(self, microphone: float, processes: float) -> None:
+        with self._processing_lock:
+            self._microphone_volume = microphone
+            self._process_volume = processes
 
     def play_sound(self, sound_id_or_path: str) -> bool:
         if self._soundboard is None:
@@ -1903,12 +1914,14 @@ class _MultiOutputSoundDeviceStream:
         effects_processor: Callable | None = None,
         monitor_voice: bool = True,
         process_source=None,
+        process_gain: Callable[[], float] | None = None,
     ) -> None:
         self._sd = sounddevice
         self._processor = processor
         self._effects_processor = effects_processor
         self._monitor_voice = monitor_voice
         self._process_source = process_source
+        self._process_gain = process_gain or (lambda: 1.0)
         self._sample_rate = sample_rate
         self._block_size = block_size
         self._stop_event = threading.Event()
@@ -2019,7 +2032,8 @@ class _MultiOutputSoundDeviceStream:
             processed = self._processor(indata, frames)
             if self._process_source is not None:
                 processed = (
-                    processed + self._process_source.take(frames)
+                    processed
+                    + self._process_source.take(frames) * self._process_gain()
                 ).clip(-1.0, 1.0)
         except Exception as exc:
             self._error = exc
@@ -2240,6 +2254,20 @@ class AudioEngine:
         with self._lock:
             self._soundboard_settings = settings
             self._backend.update_soundboard(settings)
+
+    def set_volumes(self, microphone: float, processes: float) -> None:
+        values = (microphone, processes)
+        if any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not 0.0 <= float(value) <= 2.0
+            for value in values
+        ):
+            raise ValueError("O volume deve estar entre 0 e 200 por cento.")
+        with self._lock:
+            setter = getattr(self._backend, "set_volumes", None)
+            if setter is not None:
+                setter(float(microphone), float(processes))
 
     def play_sound(self, sound_id_or_path: str) -> bool:
         with self._lock:

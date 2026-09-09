@@ -25,6 +25,20 @@ _EXCLUDED = frozenset({
 })
 
 
+def _hidden_subprocess_options() -> dict[str, object]:
+    """Prevent console helpers from flashing a Command Prompt window."""
+
+    if os.name != "nt":
+        return {}
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startupinfo.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
+    return {
+        "creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        "startupinfo": startupinfo,
+    }
+
+
 @dataclass(frozen=True, slots=True)
 class ProcessItem:
     pid: int
@@ -43,6 +57,7 @@ def list_candidate_processes() -> tuple[ProcessItem, ...]:
         completed = subprocess.run(
             ["tasklist", "/FO", "CSV", "/NH"], capture_output=True,
             text=True, encoding="utf-8", errors="replace", timeout=4, check=True,
+            **_hidden_subprocess_options(),
         )
     except (OSError, subprocess.SubprocessError):
         return ()
@@ -88,7 +103,7 @@ class ProcessAudioSource:
         try:
             self._process = subprocess.Popen(
                 args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                stderr=subprocess.PIPE, **_hidden_subprocess_options(),
             )
         except OSError as exc:
             raise RuntimeError("Não foi possível iniciar a captura dos programas.") from exc

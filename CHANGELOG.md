@@ -1,5 +1,21 @@
 # Histórico de versões
 
+## 1.2.2 — 2026-09-09
+
+- Corrige a regressão crítica das versões 1.2.0 e 1.2.1 que fazia os controles
+  aparecerem normalmente, mas enviava o áudio por uma rota sem processamento.
+- Reativa reverb, modificadores de voz, efeitos criativos, modulações, ambientes,
+  eco, limpeza de voz, redução de ruído, áudio 3D e o Painel de efeitos.
+- Mantém a transmissão do áudio de programas: o microfone percorre toda a cadeia
+  de efeitos e os programas selecionados são misturados depois, preservando o
+  áudio original de cada aplicativo.
+- Os volumes do microfone e dos programas continuam independentes e agora também
+  funcionam na rota completa de efeitos.
+- Impede que o Prompt de Comando apareça rapidamente ao abrir a Mini Mesa, listar
+  programas ou iniciar o componente auxiliar de captura.
+- Adiciona testes de regressão que exigem o motor completo na inicialização e
+  comprovam, por amostras de áudio, a aplicação dos volumes e do processamento.
+
 ## 1.2.1 — 2026-09-09
 
 - Corrige atualizações incrementais que podiam deixar de instalar o componente

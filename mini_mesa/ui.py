@@ -2976,16 +2976,6 @@ class MainFrame(wx.Frame):
         )
 
     def _show_running_state(self) -> None:
-        if getattr(self.engine, "native_only", False):
-            selected = len(self._selected_process_pids())
-            self.status.ChangeValue(
-                "Mesa ativa. O microfone e os programas selecionados estão sendo "
-                "enviados para a saída virtual sem efeitos."
-            )
-            self.SetStatusText(
-                f"Mesa ativa: microfone e {selected} programa(s) selecionado(s)."
-            )
-            return
         monitoring = self.monitor_checkbox.GetValue()
         effects = []
         if self.noise_reduction_checkbox.GetValue():
@@ -3291,8 +3281,7 @@ def run() -> int:
     app = wx.App(False)
     app.SetAppName("Mini Mesa de Som")
     try:
-        from .native_engine import NativeAudioEngine
-        engine = NativeAudioEngine()
+        engine = AudioEngine()
     except AudioDependencyError as exc:
         wx.MessageBox(str(exc), "Mini Mesa de Som", wx.OK | wx.ICON_ERROR)
         return 1

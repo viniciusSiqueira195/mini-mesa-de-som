@@ -85,6 +85,7 @@ class CreativeChoiceEventTests(unittest.TestCase):
         queued[0]()
         self.assertEqual(applied, ["applied"])
 
+
     def test_keyboard_and_choice_events_coalesce_into_one_live_update(self) -> None:
         applied: list[str] = []
         queued = []
@@ -101,6 +102,25 @@ class CreativeChoiceEventTests(unittest.TestCase):
         self.assertEqual(len(queued), 1)
         queued[0]()
         self.assertEqual(applied, ["applied"])
+
+
+class ApplicationEngineTests(unittest.TestCase):
+    def test_application_starts_with_the_effect_capable_audio_engine(self) -> None:
+        app = unittest.mock.Mock()
+        frame = unittest.mock.Mock()
+        engine = object()
+        with (
+            patch.object(ui.wx, "App", return_value=app),
+            patch.object(ui, "AudioEngine", return_value=engine) as constructor,
+            patch.object(ui, "MainFrame", return_value=frame) as main_frame,
+        ):
+            result = ui.run()
+
+        self.assertEqual(result, 0)
+        constructor.assert_called_once_with()
+        main_frame.assert_called_once_with(engine)
+        frame.Show.assert_called_once_with()
+        app.MainLoop.assert_called_once_with()
 
 
 class HelpContentTests(unittest.TestCase):

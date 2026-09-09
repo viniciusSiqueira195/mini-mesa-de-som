@@ -11,13 +11,13 @@ um cabo de áudio virtual usado pelo Discord, TeamTalk, WhatsApp ou outro progra
 
 ## Versão atual
 
-A versão **1.2.1** adiciona a transmissão do áudio de programas em execução
-junto com o microfone, controles independentes de volume e importação de vários
-arquivos no Painel de efeitos.
+A versão **1.2.2** transmite o áudio de programas junto com o microfone sem
+desativar reverb, modificadores de voz, limpeza, áudio 3D ou o Painel de efeitos.
+Ela também mantém volumes independentes e a importação de vários arquivos.
 
 ## Instalação rápida
 
-Baixe `MiniMesaDeSom-Setup-1.2.1.exe` na página da
+Baixe `MiniMesaDeSom-Setup-1.2.2.exe` na página da
 [versão mais recente](https://github.com/viniciusSiqueira195/mini-mesa-de-som/releases/latest)
 e execute o instalador. Ele pode instalar opcionalmente o VB-CABLE oficial,
 necessário para enviar o áudio processado ao TeamTalk, Discord ou outro programa.
@@ -67,17 +67,20 @@ entradas reconhecidas pelo Windows podem ser selecionadas diretamente.
 ## Fluxo do áudio
 
 ```text
-Microfone físico --------\
-                            -> mistura nativa pelo WASAPI
-Programas selecionados ----/       -> volumes independentes
+Microfone físico
+    -> volume do microfone
+    -> redução de ruído e efeitos de voz
+    -> Painel de efeitos, reverb e áudio 3D
+Programas selecionados
+    -> volume dos programas
+    -> mistura com o microfone já processado
     -> cabo de áudio virtual
     -> Discord, TeamTalk, WhatsApp ou outro aplicativo
 ```
 
-Na versão 1.2.1, a nova rota nativa mistura o microfone e os programas
-selecionados diretamente na saída virtual. Nesta primeira etapa da migração,
-os efeitos de voz, reverb, redução de ruído, áudio 3D e o Painel de efeitos ainda
-não são aplicados por essa rota.
+O microfone e os sons do Painel de efeitos percorrem a cadeia completa. O áudio
+dos programas é misturado depois desse processamento para manter a reprodução
+original do aplicativo selecionado.
 
 Os efeitos do soundboard entram na mesma rota antes do limitador. Eles chegam ao
 aplicativo de conversa pela saída virtual. Os efeitos também são ouvidos no
@@ -158,7 +161,7 @@ Depois execute:
 O script roda os testes, empacota o programa com PyInstaller, executa um autoteste
 do executável sem o Python de desenvolvimento no PATH e baixa os pacotes
 oficiais do VB-CABLE e AudioDeviceCmdlets com verificação SHA-256 e gera
-`installer-output\MiniMesaDeSom-Setup-1.2.1.exe`. O aplicativo é empacotado em
+`installer-output\MiniMesaDeSom-Setup-1.2.2.exe`. O aplicativo é empacotado em
 uma pasta interna para dar mais estabilidade às bibliotecas nativas de áudio;
 para o usuário, a entrega continua sendo um único instalador.
 
@@ -473,9 +476,8 @@ de áudio temporários, sem acessar microfones físicos nem alterar preferência
 
 - `mini_mesa/ui.py`: janela wxPython e comportamento acessível.
 - `mini_mesa/audio_engine.py`: dispositivos, ciclo da transmissão e cadeia DSP.
-- `mini_mesa/native_engine.py`: controle da rota nativa de transmissão.
 - `mini_mesa/process_audio.py`: descoberta e captura do áudio de programas.
-- `placasom.cpp`: motor nativo WASAPI para microfone, programas e saídas.
+- `placasom.cpp`: componente WASAPI usado para capturar o áudio dos programas.
 - `mini_mesa/noise_reduction.py`: adaptação de streaming e RNNoise nativo.
 - `mini_mesa/spatial_audio.py`: convolução binaural, interpolação e transições.
 - `mini_mesa/soundboard.py`: carregamento, reamostragem e mixagem dos efeitos.

@@ -88,6 +88,7 @@ class FakeBackend:
         self.previewed_sounds: list[tuple[str, str]] = []
         self.preview_stops = 0
         self.deactivate_calls = 0
+        self.created_process_pids: tuple[int, ...] = ()
 
     def input_devices(self) -> tuple[str, ...]:
         return ("FIFINE AM8", "Zeus X")
@@ -104,10 +105,11 @@ class FakeBackend:
         output_device: str,
         settings: ReverbSettings,
         monitor_output: str | None = None,
-        *, monitor_voice: bool = True,
+        *, monitor_voice: bool = True, process_pids=(),
     ) -> FakeStream:
         self.stream.set_monitor_voice(monitor_voice)
         self.created_with = (input_device, output_device, settings, monitor_output)
+        self.created_process_pids = tuple(process_pids)
         return self.stream
 
     def update_reverb(self, settings: ReverbSettings) -> None:
@@ -356,6 +358,22 @@ class BufferedAudioOutputTests(unittest.TestCase):
         self.assertEqual(output._dropped_block_count, 1)
 
 class MultiOutputStreamTests(unittest.TestCase):
+    def test_process_audio_has_its_own_live_volume(self) -> None:
+        source = Mock()
+        source.take.return_value = np.full((4, 2), 0.4, dtype=np.float32)
+        stream = _MultiOutputSoundDeviceStream(
+            sounddevice=FakeSoundDevice(), input_id=1, outputs=[(2, 2)],
+            sample_rate=48_000, input_channels=1, block_size=4,
+            processor=lambda _samples, frames: np.zeros((frames, 2), dtype=np.float32),
+            process_source=source,
+            process_gain=lambda: 0.25,
+        )
+        try:
+            stream._on_input(np.zeros((4, 1), dtype=np.float32), 4, None, None)
+            np.testing.assert_allclose(stream._primary_output._chunks[-1], 0.1)
+        finally:
+            stream.close()
+
     def test_closing_stream_twice_closes_native_devices_once(self) -> None:
         stream = _MultiOutputSoundDeviceStream(
             sounddevice=FakeSoundDevice(), input_id=1, outputs=[(2, 2)],
@@ -550,6 +568,19 @@ class PedalboardProcessingTests(unittest.TestCase):
         processed = self._render_preset(backend, samples, "none")
 
         np.testing.assert_allclose(processed, 0.09, atol=1e-6)
+
+    def test_microphone_volume_is_applied_before_the_effect_chain(self) -> None:
+        backend = self._backend_with_dry_reverb()
+        backend.update_creative_effects(CreativeEffectSettings())
+        backend.set_volumes(0.5, 1.0)
+
+        processed = backend._process_audio(
+            np.full((512, 1), 0.2, dtype=np.float32), 512
+        )
+
+        np.testing.assert_allclose(processed, 0.09, atol=1e-5)
+        self.assertAlmostEqual(backend.input_level, 0.2, places=5)
+        backend.deactivate()
 
     def test_walkie_talkie_has_a_narrow_radio_band(self) -> None:
         sample_rate = 48_000
@@ -895,13 +926,22 @@ class PedalboardProcessingTests(unittest.TestCase):
             patch(
                 "mini_mesa.audio_engine._MultiOutputSoundDeviceStream",
                 return_value=created_stream,
-            ),
+            ) as stream_constructor,
+            patch("mini_mesa.audio_engine.ProcessAudioSource") as source_constructor,
         ):
             stream = backend.create_stream(
-                "Microfone", "Cabo", ReverbSettings(enabled=False)
+                "Microfone", "Cabo", ReverbSettings(enabled=False),
+                process_pids=(123, 456),
             )
 
         self.assertIs(stream, created_stream)
+        source_constructor.assert_called_once_with(
+            backend._np, (123, 456), 44_100.0
+        )
+        self.assertIs(
+            stream_constructor.call_args.kwargs["process_source"],
+            source_constructor.return_value,
+        )
         self.assertEqual(backend._realtime_transform._sample_rate, 44_100.0)
         self.assertEqual(
             backend._realtime_transform._haas_delay.size,
@@ -1359,6 +1399,17 @@ class AudioEngineTests(unittest.TestCase):
         self.assertEqual(backend.creative_settings, creative)
         self.assertEqual(backend.pro_audio_settings, pro_audio)
         self.assertEqual(backend.soundboard_settings, soundboard)
+        engine.stop()
+
+    def test_selected_programs_reach_the_effect_capable_backend(self) -> None:
+        backend = FakeBackend()
+        engine = AudioEngine(backend)
+
+        engine.start(
+            "FIFINE AM8", "CABLE Input", process_pids=(456, 123, 456)
+        )
+
+        self.assertEqual(backend.created_process_pids, (123, 456))
         engine.stop()
 
     def test_optional_monitor_output_reaches_backend(self) -> None:
