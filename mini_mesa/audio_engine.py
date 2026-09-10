@@ -163,10 +163,13 @@ class _StreamingPitchShifter:
         sample_rate: float,
         window_size: int = 4096,
         overlap: int = 1024,
+        max_pending_windows: int = 3,
         synchronous: bool = False,
     ) -> None:
         if overlap <= 0 or overlap >= window_size:
             raise ValueError("A sobreposição deve ser menor que a janela de pitch.")
+        if max_pending_windows <= 0:
+            raise ValueError("A fila de pitch deve aceitar ao menos uma janela.")
         self._np = numpy_module
         self._processor = processor
         self._sample_rate = sample_rate
@@ -183,7 +186,7 @@ class _StreamingPitchShifter:
         self._pending_tail = None
         self._output_lock = threading.Lock()
         self._error: Exception | None = None
-        self._jobs: Queue = Queue(maxsize=3)
+        self._jobs: Queue = Queue(maxsize=max_pending_windows)
         self._stopped = threading.Event()
         phase = numpy_module.linspace(
             0.0, numpy_module.pi / 2.0, overlap, endpoint=True
@@ -1690,8 +1693,20 @@ class PedalboardBackend:
             processor = _MixedPitchProcessor(self._np, pitched, 0.20, 0.80)
         else:
             processor = pitched
+        if self._voice_settings.compatibility_mode:
+            # A longer analysis window and eight queued windows add latency,
+            # but give slower machines substantially more time to render pitch
+            # bursts before the real-time callback needs to drop a window.
+            window_size, overlap, max_pending_windows = 6144, 1536, 8
+        else:
+            window_size, overlap, max_pending_windows = 4096, 1024, 3
         self._pitch_shifter = _StreamingPitchShifter(
-            self._np, processor, self._sample_rate
+            self._np,
+            processor,
+            self._sample_rate,
+            window_size=window_size,
+            overlap=overlap,
+            max_pending_windows=max_pending_windows,
         )
 
     def update_noise_reduction(self, enabled: bool) -> None:

@@ -123,6 +123,38 @@ class NotebookTests(unittest.TestCase):
         self.assertFalse(self.frame.IsIconized())
         self.engine.stop.assert_not_called()
 
+    def test_window_toggle_shortcut_action_minimizes_and_restores_without_audio_changes(self) -> None:
+        self.frame.Show()
+        self.app.Yield()
+
+        self.frame.toggle_window_visibility()
+        self.app.Yield()
+        self.assertTrue(self.frame.IsIconized())
+
+        self.frame.toggle_window_visibility()
+        self.app.Yield()
+        self.assertTrue(self.frame.IsShown())
+        self.assertFalse(self.frame.IsIconized())
+        self.assertEqual(self.engine.mock_calls, [])
+
+    def test_hotkey_settings_persist_window_toggle_and_windows_startup(self) -> None:
+        dialog = Mock()
+        dialog.ShowModal.return_value = ui.wx.ID_OK
+        dialog.values = (False, "control", "alt", True, "control_alt", "Q", True)
+        with (
+            patch.object(ui, "HotkeySettingsDialog", return_value=dialog),
+            patch.object(self.frame, "_apply_global_hotkeys", return_value=True),
+            patch.object(ui, "configure_startup") as configure_startup,
+        ):
+            self.frame._on_hotkey_settings(None)
+
+        self.assertTrue(self.frame.preferences.window_toggle_shortcut_enabled)
+        self.assertEqual(self.frame.preferences.window_toggle_shortcut_modifier, "control_alt")
+        self.assertEqual(self.frame.preferences.window_toggle_shortcut_key, "Q")
+        self.assertTrue(self.frame.preferences.launch_at_startup)
+        configure_startup.assert_called_once_with(True)
+        self.store.save.assert_called_once_with(self.frame.preferences)
+
     def test_minimize_hides_and_notifies_then_restore_stays_visible(self) -> None:
         tray = Mock(is_available=True)
         self.frame._tray_icon = tray

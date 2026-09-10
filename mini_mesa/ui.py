@@ -12,6 +12,7 @@ from markdown import markdown as render_markdown
 
 from . import __version__
 from .global_hotkeys import GlobalHotkeyManager, modifier_label
+from .startup import configure_startup
 from .release_notes import load_release_notes
 from .audio_engine import AudioDependencyError, AudioEngine, match_device_label
 from .preferences import AppPreferences, PersonalSound, PreferencesStore
@@ -1229,6 +1230,8 @@ class DiagnosticDialog(wx.Dialog):
 class HotkeySettingsDialog(wx.Dialog):
     _EFFECT_VALUES = ("control", "control_alt")
     _PAGE_VALUES = ("alt", "alt_shift")
+    _WINDOW_VALUES = ("control", "control_shift", "control_alt", "alt", "alt_shift")
+    _WINDOW_KEYS = tuple("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
 
     def __init__(self, parent: wx.Window, preferences: AppPreferences) -> None:
         super().__init__(parent, title="Atalhos globais")
@@ -1256,6 +1259,44 @@ class HotkeySettingsDialog(wx.Dialog):
         )
         self.page_modifier.SetSelection(self._PAGE_VALUES.index(preferences.global_page_modifier))
         root.Add(self.page_modifier, 0, wx.ALL | wx.EXPAND, 12)
+        self.window_toggle_enabled = wx.CheckBox(
+            self, label="Ativar atalho para mostrar ou minimizar a &Mini Mesa"
+        )
+        self.window_toggle_enabled.SetValue(preferences.window_toggle_shortcut_enabled)
+        self.window_toggle_enabled.Bind(wx.EVT_CHECKBOX, self._update_window_toggle_controls)
+        root.Add(self.window_toggle_enabled, 0, wx.ALL | wx.EXPAND, 12)
+        root.Add(wx.StaticText(self, label="Modificador do atalho da Mini Mesa:"), 0, wx.LEFT | wx.RIGHT, 12)
+        self.window_toggle_modifier = wx.Choice(
+            self, choices=[modifier_label(value) for value in self._WINDOW_VALUES]
+        )
+        _set_choice_accessible_name(
+            self.window_toggle_modifier, "Modificador do atalho da Mini Mesa"
+        )
+        self.window_toggle_modifier.SetSelection(
+            self._WINDOW_VALUES.index(preferences.window_toggle_shortcut_modifier)
+        )
+        root.Add(self.window_toggle_modifier, 0, wx.ALL | wx.EXPAND, 12)
+        root.Add(wx.StaticText(self, label="Tecla do atalho da Mini Mesa:"), 0, wx.LEFT | wx.RIGHT, 12)
+        self.window_toggle_key = wx.Choice(self, choices=self._WINDOW_KEYS)
+        _set_choice_accessible_name(self.window_toggle_key, "Tecla do atalho da Mini Mesa")
+        self.window_toggle_key.SetSelection(
+            self._WINDOW_KEYS.index(preferences.window_toggle_shortcut_key)
+        )
+        root.Add(self.window_toggle_key, 0, wx.ALL | wx.EXPAND, 12)
+        self.launch_at_startup = wx.CheckBox(
+            self, label="Iniciar a Mini Mesa com o &Windows"
+        )
+        self.launch_at_startup.SetValue(preferences.launch_at_startup)
+        root.Add(self.launch_at_startup, 0, wx.ALL | wx.EXPAND, 12)
+        root.Add(
+            wx.StaticText(
+                self,
+                label="A inicialização abre a Mini Mesa, mas não ativa a transmissão de áudio.",
+            ),
+            0,
+            wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND,
+            12,
+        )
         root.Add(
             wx.StaticText(
                 self,
@@ -1275,12 +1316,25 @@ class HotkeySettingsDialog(wx.Dialog):
         root.Add(buttons, 0, wx.ALL | wx.EXPAND, 12)
         self.SetSizerAndFit(root)
 
+        self._update_window_toggle_controls(None)
+
+    def _update_window_toggle_controls(self, event: wx.CommandEvent | None) -> None:
+        enabled = self.window_toggle_enabled.GetValue()
+        self.window_toggle_modifier.Enable(enabled)
+        self.window_toggle_key.Enable(enabled)
+        if event is not None:
+            event.Skip()
+
     @property
-    def values(self) -> tuple[bool, str, str]:
+    def values(self) -> tuple[bool, str, str, bool, str, str, bool]:
         return (
             self.enabled.GetValue(),
             self._EFFECT_VALUES[self.effect_modifier.GetSelection()],
             self._PAGE_VALUES[self.page_modifier.GetSelection()],
+            self.window_toggle_enabled.GetValue(),
+            self._WINDOW_VALUES[self.window_toggle_modifier.GetSelection()],
+            self._WINDOW_KEYS[self.window_toggle_key.GetSelection()],
+            self.launch_at_startup.GetValue(),
         )
 
 
@@ -1509,11 +1563,20 @@ class MainFrame(wx.Frame):
         self.voice_pitch.Enable(self.preferences.voice_enabled)
         self.voice_pitch.Bind(wx.EVT_SLIDER, self._on_voice_changed)
 
+        self.voice_compatibility = EffectToggleButton(
+            box_voice,
+            label="Ativar modo de &compatibilidade (reduz cortes e aumenta o atraso)",
+        )
+        self.voice_compatibility.SetValue(self.preferences.voice_compatibility_mode)
+        self.voice_compatibility.Enable(self.preferences.voice_enabled)
+        self.voice_compatibility.BindToggle(self._on_voice_changed)
+
         voice_box.Add(self.voice_checkbox, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
         voice_box.Add(voice_preset_label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
         voice_box.Add(self.voice_preset_choice, 0, wx.ALL | wx.EXPAND, 8)
         voice_box.Add(voice_pitch_label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
         voice_box.Add(self.voice_pitch, 0, wx.ALL | wx.EXPAND, 8)
+        voice_box.Add(self.voice_compatibility, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 8)
         voice_root.Add(voice_box, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
         self.voice_preset_choice.SetSelection(
             next(
@@ -2143,6 +2206,10 @@ class MainFrame(wx.Frame):
                 play=self.soundboard_panel.play_index,
                 select_page=lambda page: self.soundboard_panel.select_page(page, focus=False),
                 stop=self.stop_sound_effects,
+                toggle_window=self.toggle_window_visibility,
+                window_toggle_enabled=self.preferences.window_toggle_shortcut_enabled,
+                window_toggle_modifier=self.preferences.window_toggle_shortcut_modifier,
+                window_toggle_key=self.preferences.window_toggle_shortcut_key,
             )
             return True
         except RuntimeError as exc:
@@ -2161,7 +2228,15 @@ class MainFrame(wx.Frame):
         try:
             if dialog.ShowModal() != wx.ID_OK:
                 return
-            enabled, effect_modifier, page_modifier = dialog.values
+            (
+                enabled,
+                effect_modifier,
+                page_modifier,
+                window_toggle_enabled,
+                window_toggle_modifier,
+                window_toggle_key,
+                launch_at_startup,
+            ) = dialog.values
         finally:
             dialog.Destroy()
         previous = self.preferences
@@ -2170,15 +2245,24 @@ class MainFrame(wx.Frame):
             global_shortcuts_enabled=enabled,
             global_effect_modifier=effect_modifier,
             global_page_modifier=page_modifier,
+            window_toggle_shortcut_enabled=window_toggle_enabled,
+            window_toggle_shortcut_modifier=window_toggle_modifier,
+            window_toggle_shortcut_key=window_toggle_key,
+            launch_at_startup=launch_at_startup,
         )
         if not self._apply_global_hotkeys():
             return
         try:
+            configure_startup(launch_at_startup)
             self.preferences_store.save(self.preferences)
-        except OSError as exc:
+        except (OSError, RuntimeError) as exc:
             self.preferences = previous
             self._apply_global_hotkeys(show_error=False)
-            self._show_error(f"Não foi possível salvar os atalhos globais.\n\n{exc}")
+            try:
+                configure_startup(previous.launch_at_startup)
+            except (OSError, RuntimeError):
+                pass
+            self._show_error(f"Não foi possível salvar as configurações.\n\n{exc}")
             return
         self.SetStatusText(
             "Atalhos globais ativados."
@@ -2815,6 +2899,7 @@ class MainFrame(wx.Frame):
             voice_enabled=self.voice_checkbox.GetValue(),
             voice_preset=voice_preset,
             voice_pitch_semitones=float(self.voice_pitch.GetValue()),
+            voice_compatibility_mode=self.voice_compatibility.GetValue(),
             creative_effect_preset=preset,
             modulation_effect=_MODULATIONS[self.modulation_choice.GetSelection()][0],
             ambience_preset=_AMBIENCES[self.ambience_choice.GetSelection()][0],
@@ -2840,6 +2925,10 @@ class MainFrame(wx.Frame):
             global_shortcuts_enabled=self.preferences.global_shortcuts_enabled,
             global_effect_modifier=self.preferences.global_effect_modifier,
             global_page_modifier=self.preferences.global_page_modifier,
+            window_toggle_shortcut_enabled=self.preferences.window_toggle_shortcut_enabled,
+            window_toggle_shortcut_modifier=self.preferences.window_toggle_shortcut_modifier,
+            window_toggle_shortcut_key=self.preferences.window_toggle_shortcut_key,
+            launch_at_startup=self.preferences.launch_at_startup,
             feedback_sounds_enabled=self.preferences.feedback_sounds_enabled,
             soundboard_volume_percent=self._soundboard_settings.volume_percent,
             soundboard_ducking_enabled=self._soundboard_settings.ducking_enabled,
@@ -2876,6 +2965,7 @@ class MainFrame(wx.Frame):
             index for index, item in enumerate(_VOICE_PRESETS) if item[0] == preferences.voice_preset
         ))
         self.voice_pitch.SetValue(round(preferences.voice_pitch_semitones))
+        self.voice_compatibility.SetValue(preferences.voice_compatibility_mode)
         self._update_voice_controls()
         self.creative_choice.SetSelection(next(
             index for index, item in enumerate(_STYLE_PRESETS)
@@ -2969,6 +3059,7 @@ class MainFrame(wx.Frame):
             enabled=self.voice_checkbox.GetValue(),
             preset=_VOICE_PRESETS[self.voice_preset_choice.GetSelection()][0],
             pitch_semitones=float(self.voice_pitch.GetValue()),
+            compatibility_mode=self.voice_compatibility.GetValue(),
         )
 
     def _current_creative_settings(self) -> CreativeEffectSettings:
@@ -3025,6 +3116,7 @@ class MainFrame(wx.Frame):
         enabled = self.voice_checkbox.GetValue()
         self.voice_preset_choice.Enable(enabled)
         self.voice_pitch.Enable(enabled)
+        self.voice_compatibility.Enable(enabled)
 
     def _update_creative_controls(self) -> None:
         self.delay_level.Enable(self.delay_checkbox.GetValue())
@@ -3490,6 +3582,14 @@ class MainFrame(wx.Frame):
         self.Iconize(False)
         self.Raise()
         wx.CallAfter(self._restore_focus)
+
+    def toggle_window_visibility(self) -> None:
+        """Show the mixer over other windows, or minimize it back to the tray."""
+
+        if not self.IsShown() or self.IsIconized():
+            self.restore_from_tray()
+            return
+        self.Iconize(True)
 
     def _restore_focus(self) -> None:
         if self.IsBeingDeleted() or self.IsIconized() or not self.IsShown():

@@ -129,6 +129,31 @@ class GlobalHotkeyTests(unittest.TestCase):
                 )
         self.assertEqual(window.UnregisterHotKey.call_count, 2)
 
+    def test_registers_window_toggle_without_effect_shortcuts(self):
+        window = Mock()
+        window.RegisterHotKey.return_value = True
+        manager = GlobalHotkeyManager(window)
+        toggle = Mock()
+
+        with patch("mini_mesa.global_hotkeys.wx.NewIdRef", return_value=73):
+            manager.apply(
+                enabled=False,
+                effect_modifier="control",
+                page_modifier="alt",
+                play=Mock(),
+                select_page=Mock(),
+                stop=Mock(),
+                toggle_window=toggle,
+                window_toggle_enabled=True,
+                window_toggle_modifier="control_alt",
+                window_toggle_key="M",
+            )
+
+        self.assertEqual(window.RegisterHotKey.call_count, 1)
+        self.assertEqual(window.RegisterHotKey.call_args.args[2], ord("M"))
+        window.Bind.call_args.args[1](None)
+        toggle.assert_called_once_with()
+
 
 class DiagnosticTests(unittest.TestCase):
     def test_report_is_readable_and_contains_devices(self):

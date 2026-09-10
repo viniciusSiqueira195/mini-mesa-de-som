@@ -94,10 +94,12 @@ class VoiceControlTests(unittest.TestCase):
                 voice_checkbox=_FakeControl(value=enabled),
                 voice_preset_choice=_FakeControl(),
                 voice_pitch=_FakeControl(),
+                voice_compatibility=_FakeControl(),
             )
             ui.MainFrame._update_voice_controls(frame)
             self.assertEqual(frame.voice_preset_choice.enabled, enabled)
             self.assertEqual(frame.voice_pitch.enabled, enabled)
+            self.assertEqual(frame.voice_compatibility.enabled, enabled)
 
 
 class ProcessSelectionAnnouncementTests(unittest.TestCase):
