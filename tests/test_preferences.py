@@ -34,6 +34,10 @@ class PreferencesStoreTests(unittest.TestCase):
                 global_shortcuts_enabled=True,
                 global_effect_modifier="control_alt",
                 global_page_modifier="alt_shift",
+                window_toggle_shortcut_enabled=True,
+                window_toggle_shortcut_modifier="control_shift",
+                window_toggle_shortcut_key="Q",
+                launch_at_startup=True,
                 feedback_sounds_enabled=True,
             )
 
@@ -124,6 +128,19 @@ class PreferencesStoreTests(unittest.TestCase):
         self.assertEqual(preferences.global_effect_modifier, "control")
         self.assertEqual(preferences.global_page_modifier, "alt")
         self.assertFalse(preferences.feedback_sounds_enabled)
+
+    def test_invalid_window_shortcut_and_startup_preferences_fall_back_safely(self) -> None:
+        preferences = AppPreferences.from_dict({
+            "window_toggle_shortcut_enabled": "sim",
+            "window_toggle_shortcut_modifier": "windows",
+            "window_toggle_shortcut_key": "F1",
+            "launch_at_startup": 1,
+        })
+
+        self.assertFalse(preferences.window_toggle_shortcut_enabled)
+        self.assertEqual(preferences.window_toggle_shortcut_modifier, "control_alt")
+        self.assertEqual(preferences.window_toggle_shortcut_key, "M")
+        self.assertFalse(preferences.launch_at_startup)
 
     def test_legacy_voice_pitch_migrates_to_the_matching_preset(self) -> None:
         preferences = AppPreferences.from_dict(

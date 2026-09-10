@@ -106,6 +106,7 @@ class VoiceSettings:
     preset: str = "custom"
     pitch_semitones: float = 4.0
     highpass_cutoff: float = 120.0
+    compatibility_mode: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.enabled, bool):
@@ -124,6 +125,8 @@ class VoiceSettings:
             raise TypeError("Frequência de corte do filtro deve ser um número")
         if not 20.0 <= float(self.highpass_cutoff) <= 500.0:
             raise ValueError("Frequência do filtro deve estar entre 20.0 e 500.0 Hz")
+        if not isinstance(self.compatibility_mode, bool):
+            raise TypeError("Modo de compatibilidade deve ser verdadeiro ou falso")
 
 
 VALID_VOICE_PRESETS = (

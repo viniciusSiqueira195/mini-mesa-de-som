@@ -95,6 +95,7 @@ class AppPreferences:
     voice_enabled: bool = False
     voice_preset: str = "female"
     voice_pitch_semitones: float = 4.0
+    voice_compatibility_mode: bool = False
     creative_effect_preset: str = "none"
     modulation_effect: str = "none"
     ambience_preset: str = "none"
@@ -130,6 +131,10 @@ class AppPreferences:
     global_shortcuts_enabled: bool = False
     global_effect_modifier: str = "control"
     global_page_modifier: str = "alt"
+    window_toggle_shortcut_enabled: bool = False
+    window_toggle_shortcut_modifier: str = "control_alt"
+    window_toggle_shortcut_key: str = "M"
+    launch_at_startup: bool = False
     feedback_sounds_enabled: bool = False
 
     @property
@@ -291,6 +296,22 @@ class AppPreferences:
             global_page_modifier=text_value("global_page_modifier", "alt")
             if text_value("global_page_modifier", "alt") in {"alt", "alt_shift"}
             else "alt",
+            window_toggle_shortcut_enabled=bool_value(
+                "window_toggle_shortcut_enabled", False
+            ),
+            window_toggle_shortcut_modifier=text_value(
+                "window_toggle_shortcut_modifier", "control_alt"
+            )
+            if text_value("window_toggle_shortcut_modifier", "control_alt")
+            in {"control", "control_shift", "control_alt", "alt", "alt_shift"}
+            else "control_alt",
+            window_toggle_shortcut_key=text_value(
+                "window_toggle_shortcut_key", "M"
+            )
+            if text_value("window_toggle_shortcut_key", "M")
+            in tuple("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+            else "M",
+            launch_at_startup=bool_value("launch_at_startup", False),
             feedback_sounds_enabled=bool_value("feedback_sounds_enabled", False),
             last_seen_news_version=text_value("last_seen_news_version", ""),
             welcome_shown=bool_value("welcome_shown", defaults.welcome_shown),
@@ -319,6 +340,9 @@ class AppPreferences:
             voice_enabled=bool_value("voice_enabled", defaults.voice_enabled) and not removed_voice_preset,
             voice_preset=voice_preset,
             voice_pitch_semitones=voice_pitch,
+            voice_compatibility_mode=bool_value(
+                "voice_compatibility_mode", defaults.voice_compatibility_mode
+            ),
             creative_effect_preset=preset,
             modulation_effect=modulation,
             ambience_preset=ambience,

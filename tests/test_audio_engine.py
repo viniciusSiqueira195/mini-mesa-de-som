@@ -845,6 +845,21 @@ class PedalboardProcessingTests(unittest.TestCase):
             self.assertGreater(peak_hz, minimum_hz, semitones)
             self.assertLess(peak_hz, maximum_hz, semitones)
 
+    def test_compatibility_mode_uses_a_larger_pitch_buffer(self) -> None:
+        backend = self._backend_with_dry_reverb()
+
+        backend.update_voice_effect(
+            VoiceSettings(enabled=True, compatibility_mode=True)
+        )
+
+        shifter = backend._pitch_shifter
+        self.assertIsNotNone(shifter)
+        assert shifter is not None
+        self.assertEqual(shifter._window_size, 6144)
+        self.assertEqual(shifter._overlap, 1536)
+        self.assertEqual(shifter._jobs.maxsize, 8)
+        shifter.close(timeout=0.25)
+
     def test_low_eq_uses_the_pedalboard_low_shelf_filter(self) -> None:
         backend = PedalboardBackend()
         backend._reverb = backend._Reverb()

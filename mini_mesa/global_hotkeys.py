@@ -25,7 +25,7 @@ def modifier_label(value: str) -> str:
 
 
 class GlobalHotkeyManager:
-    """Own system-wide numeric shortcuts and release them as one transaction."""
+    """Own system-wide shortcuts and release them as one transaction."""
 
     def __init__(self, window: wx.Window) -> None:
         self.window = window
@@ -40,16 +40,25 @@ class GlobalHotkeyManager:
         play: Callable[[int], None],
         select_page: Callable[[int], None],
         stop: Callable[[], None],
+        toggle_window: Callable[[], None] = lambda: None,
+        window_toggle_enabled: bool = False,
+        window_toggle_modifier: str = "control_alt",
+        window_toggle_key: str = "M",
     ) -> None:
         self.close()
-        if not enabled:
+        if not enabled and not window_toggle_enabled:
             return
         registrations = []
-        for index in range(10):
-            key = ord(str((index + 1) % 10))
-            registrations.append((effect_modifier, key, lambda index=index: play(index)))
-            registrations.append((page_modifier, key, lambda index=index: select_page(index)))
-        registrations.append(("control_shift", ord("0"), stop))
+        if enabled:
+            for index in range(10):
+                key = ord(str((index + 1) % 10))
+                registrations.append((effect_modifier, key, lambda index=index: play(index)))
+                registrations.append((page_modifier, key, lambda index=index: select_page(index)))
+            registrations.append(("control_shift", ord("0"), stop))
+        if window_toggle_enabled:
+            registrations.append(
+                (window_toggle_modifier, ord(window_toggle_key), toggle_window)
+            )
         try:
             for modifier, key, action in registrations:
                 identifier = int(wx.NewIdRef())
