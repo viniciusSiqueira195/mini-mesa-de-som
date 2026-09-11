@@ -27,6 +27,7 @@ from mini_mesa.audio_engine import (
 from mini_mesa.settings import (
     CreativeEffectSettings,
     ProAudioSettings,
+    PlaybackEffectsSettings,
     ReverbSettings,
     SoundboardSettings,
     SpatialSettings,
@@ -84,11 +85,13 @@ class FakeBackend:
         self.creative_settings = CreativeEffectSettings()
         self.pro_audio_settings = ProAudioSettings()
         self.soundboard_settings = SoundboardSettings()
+        self.playback_effects_settings = PlaybackEffectsSettings()
         self.played_sounds: list[str] = []
         self.previewed_sounds: list[tuple[str, str]] = []
         self.preview_stops = 0
         self.deactivate_calls = 0
         self.created_process_pids: tuple[int, ...] = ()
+        self.created_playback_process_pids: tuple[int, ...] = ()
         self.updated_process_pids: list[tuple[int, ...]] = []
 
     def input_devices(self) -> tuple[str, ...]:
@@ -106,11 +109,12 @@ class FakeBackend:
         output_device: str,
         settings: ReverbSettings,
         monitor_output: str | None = None,
-        *, monitor_voice: bool = True, process_pids=(),
+        *, monitor_voice: bool = True, process_pids=(), playback_process_pids=(),
     ) -> FakeStream:
         self.stream.set_monitor_voice(monitor_voice)
         self.created_with = (input_device, output_device, settings, monitor_output)
         self.created_process_pids = tuple(process_pids)
+        self.created_playback_process_pids = tuple(playback_process_pids)
         return self.stream
 
     def update_reverb(self, settings: ReverbSettings) -> None:
@@ -127,6 +131,9 @@ class FakeBackend:
 
     def update_soundboard(self, settings: SoundboardSettings) -> None:
         self.soundboard_settings = settings
+
+    def update_playback_effects(self, settings: PlaybackEffectsSettings) -> None:
+        self.playback_effects_settings = settings
 
     def update_processes(self, process_pids) -> None:
         self.updated_process_pids.append(tuple(process_pids))
@@ -554,6 +561,19 @@ class PedalboardProcessingTests(unittest.TestCase):
             dry_level=settings.dry_level,
         )
         return backend
+
+    def test_playback_reverb_keeps_history_between_audio_blocks(self) -> None:
+        backend = self._backend_with_dry_reverb()
+        backend.update_playback_effects(PlaybackEffectsSettings(reverb_enabled=True))
+        block = np.full((512, 2), 0.5, dtype=np.float32)
+
+        backend._apply_playback_effects(block)
+        backend._apply_playback_effects(block)
+        third_block = backend._apply_playback_effects(block)
+
+        # The 1,200-sample reverb tap reaches this callback after crossing
+        # two 512-sample callback boundaries.
+        self.assertGreater(float(third_block[200, 0]), 0.5)
 
     @staticmethod
     def _render_preset(backend, samples, preset: str):
@@ -1578,6 +1598,33 @@ class AudioEngineTests(unittest.TestCase):
         engine.update_settings(settings)
 
         self.assertEqual(backend.updated_with, settings)
+        engine.stop()
+
+    def test_playback_effects_selected_before_start_reach_backend(self) -> None:
+        backend = FakeBackend()
+        engine = AudioEngine(backend)
+        settings = PlaybackEffectsSettings(
+            reverb_enabled=True, delay_enabled=True, stereo_width_percent=65,
+            volume_percent=80,
+        )
+
+        engine.update_playback_effects(settings)
+        engine.start("Zeus X", "CABLE Input", effects_output="Alto-falantes")
+
+        self.assertEqual(backend.playback_effects_settings, settings)
+        engine.stop()
+
+    def test_selected_playback_processes_are_not_sent_to_transmission(self) -> None:
+        backend = FakeBackend()
+        engine = AudioEngine(backend)
+
+        engine.start(
+            "Zeus X", "CABLE Input", effects_output="Alto-falantes",
+            playback_process_pids=(123, 456),
+        )
+
+        self.assertEqual(backend.created_process_pids, ())
+        self.assertEqual(backend.created_playback_process_pids, (123, 456))
         engine.stop()
 
     def test_all_live_effect_changes_reach_the_backend(self) -> None:

@@ -181,8 +181,10 @@ class ProcessSelectionAnnouncementTests(unittest.TestCase):
 
         frame = types.SimpleNamespace(
             input_choice=Control(), output_choice=Control(), monitor_checkbox=Control(),
-            monitor_choice=Control(), refresh_button=Control(), process_list=Control(),
-            refresh_processes_button=Control(), noise_reduction_checkbox=Control(),
+            monitor_choice=Control(), playback_output_choice=Control(),
+            refresh_button=Control(), process_list=Control(),
+            refresh_processes_button=Control(), playback_process_list=Control(),
+            refresh_playback_processes_button=Control(), noise_reduction_checkbox=Control(),
         )
 
         ui.MainFrame._set_routing_controls_enabled(frame, False)

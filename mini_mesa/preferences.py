@@ -86,6 +86,7 @@ class AppPreferences:
     reverb_enabled: bool = True
     reverb_level: int = 25
     noise_reduction_enabled: bool = False
+    noise_reduction_level_percent: int = 100
     spatial_enabled: bool = False
     spatial_x: int = 0
     spatial_y: int = 0
@@ -118,6 +119,10 @@ class AppPreferences:
     soundboard_volume_percent: int = 80
     soundboard_ducking_enabled: bool = False
     soundboard_ducking_percent: int = 60
+    playback_reverb_enabled: bool = False
+    playback_delay_enabled: bool = False
+    playback_stereo_width_percent: int = 100
+    playback_volume_percent: int = 100
     recording_format: str = "mp3"
     recording_bitrate_kbps: int = 192
     recording_mode: str = "both"
@@ -328,6 +333,10 @@ class AppPreferences:
             reverb_level=level,
             noise_reduction_enabled=bool_value(
                 "noise_reduction_enabled", defaults.noise_reduction_enabled
+            ),
+            noise_reduction_level_percent=percent_value(
+                "noise_reduction_level_percent",
+                defaults.noise_reduction_level_percent,
             ),
             spatial_enabled=bool_value("spatial_enabled", defaults.spatial_enabled),
             spatial_x=spatial_x,

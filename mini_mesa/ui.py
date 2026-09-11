@@ -1520,6 +1520,8 @@ class MainFrame(wx.Frame):
         )
         self.reverb_level.Enable(self.preferences.reverb_enabled)
         self.reverb_level.Bind(wx.EVT_SLIDER, self._on_settings_changed)
+        level_label.Reparent(box_effect)
+        self.reverb_level.Reparent(box_effect)
         effect.Add(self.reverb_checkbox, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
         effect.Add(level_label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
         effect.Add(self.reverb_level, 0, wx.ALL | wx.EXPAND, 8)
@@ -1570,7 +1572,9 @@ class MainFrame(wx.Frame):
         self.voice_compatibility.SetValue(self.preferences.voice_compatibility_mode)
         self.voice_compatibility.Enable(self.preferences.voice_enabled)
         self.voice_compatibility.BindToggle(self._on_voice_changed)
-
+        for control in (voice_preset_label, self.voice_preset_choice, voice_pitch_label,
+                        self.voice_pitch, self.voice_compatibility):
+            control.Reparent(box_voice)
         voice_box.Add(self.voice_checkbox, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
         voice_box.Add(voice_preset_label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
         voice_box.Add(self.voice_preset_choice, 0, wx.ALL | wx.EXPAND, 8)
@@ -1712,7 +1716,14 @@ class MainFrame(wx.Frame):
         )
         self.delay_level.Enable(self.preferences.delay_enabled)
         self.delay_level.Bind(wx.EVT_SLIDER, self._on_creative_changed)
-
+        for control in (creative_label, self.creative_choice, modulation_label,
+                        self.modulation_choice, ambience_label, self.ambience_choice,
+                        style_intensity_label, self.style_intensity,
+                        modulation_intensity_label, self.modulation_intensity,
+                        ambience_intensity_label, self.ambience_intensity,
+                        self.roger_beep_checkbox, self.delay_checkbox, delay_label,
+                        self.delay_level):
+            control.Reparent(box_creative)
         creative_box.Add(creative_label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
         creative_box.Add(self.creative_choice, 0, wx.ALL | wx.EXPAND, 8)
         creative_box.Add(modulation_label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
@@ -1836,12 +1847,29 @@ class MainFrame(wx.Frame):
             self.preferences.noise_reduction_enabled
         )
         self.noise_reduction_checkbox.BindToggle(self._on_noise_reduction_toggled)
+        self.noise_reduction_level = wx.Slider(
+            box_noise,
+            value=self.preferences.noise_reduction_level_percent,
+            minValue=0,
+            maxValue=100,
+            style=wx.SL_HORIZONTAL | wx.SL_LABELS,
+        )
+        self._noise_reduction_level_accessible = _set_slider_accessible_name(
+            self.noise_reduction_level, "Intensidade da redução de ruído"
+        )
+        self.noise_reduction_level.Enable(self.preferences.noise_reduction_enabled)
+        self.noise_reduction_level.Bind(wx.EVT_SLIDER, self._on_noise_reduction_level_changed)
         noise_reduction.Add(
             self.noise_reduction_checkbox,
             0,
-            wx.LEFT | wx.RIGHT | wx.TOP | wx.BOTTOM,
+            wx.LEFT | wx.RIGHT | wx.TOP,
             8,
         )
+        noise_reduction.Add(
+            wx.StaticText(box_noise, label="Intensidade da redução de ruído (0 a 100):"),
+            0, wx.LEFT | wx.RIGHT | wx.TOP, 8,
+        )
+        noise_reduction.Add(self.noise_reduction_level, 0, wx.ALL | wx.EXPAND, 8)
         cleanup_root.Add(
             noise_reduction,
             0,
@@ -2774,6 +2802,12 @@ class MainFrame(wx.Frame):
             self._show_error(f"Não foi possível listar os dispositivos de áudio.\n\n{exc}")
             return
 
+        # A local monitor must never point to the same endpoint used to feed
+        # Discord/TeamTalk.  Some virtual cables are named "CABLE Input" and
+        # do not contain the word "virtual", so filtering only by name is not
+        # sufficient here.
+        local_outputs = monitor_outputs
+
         self._replace_choices(
             self.input_choice,
             inputs,
@@ -2788,13 +2822,13 @@ class MainFrame(wx.Frame):
         )
         self._replace_choices(
             self.monitor_choice,
-            monitor_outputs,
+            local_outputs,
             selected_monitor,
             prefer_physical_output=True,
         )
         self.SetStatusText(
             f"{len(inputs)} entradas, {len(outputs)} saídas e "
-            f"{len(monitor_outputs)} retornos compatíveis encontrados."
+            f"{len(local_outputs)} retornos locais compatíveis encontrados."
         )
 
     @staticmethod
@@ -2890,6 +2924,7 @@ class MainFrame(wx.Frame):
             reverb_enabled=self.reverb_checkbox.GetValue(),
             reverb_level=self.reverb_level.GetValue(),
             noise_reduction_enabled=self.noise_reduction_checkbox.GetValue(),
+            noise_reduction_level_percent=self.noise_reduction_level.GetValue(),
             spatial_enabled=self.spatial_checkbox.GetValue(),
             spatial_x=self.spatial_x.GetValue(),
             spatial_y=self.spatial_y.GetValue(),
@@ -2953,6 +2988,8 @@ class MainFrame(wx.Frame):
         self.reverb_level.SetValue(preferences.reverb_level)
         self.reverb_level.Enable(preferences.reverb_enabled)
         self.noise_reduction_checkbox.SetValue(preferences.noise_reduction_enabled)
+        self.noise_reduction_level.SetValue(preferences.noise_reduction_level_percent)
+        self.noise_reduction_level.Enable(preferences.noise_reduction_enabled)
         self.spatial_checkbox.SetValue(preferences.spatial_enabled)
         self.spatial_x.SetValue(preferences.spatial_x)
         self.spatial_y.SetValue(preferences.spatial_y)
@@ -3312,7 +3349,8 @@ class MainFrame(wx.Frame):
         if setter is not None:
             setter(self.microphone_volume.GetValue() / 100.0, self.process_volume.GetValue() / 100.0)
         self.engine.update_noise_reduction(
-            self.noise_reduction_checkbox.GetValue()
+            self.noise_reduction_checkbox.GetValue(),
+            self.noise_reduction_level.GetValue(),
         )
         self.engine.update_settings(self._current_settings())
         self.engine.update_voice_settings(self._current_voice_settings())
@@ -3321,9 +3359,7 @@ class MainFrame(wx.Frame):
         self.engine.update_soundboard_settings(self._soundboard_settings)
         self.engine.update_spatial(self._current_spatial_settings())
         process_pids = self._selected_process_pids()
-        start_options = {
-            "effects_output": self.monitor_choice.GetStringSelection() or None,
-        }
+        start_options = {}
         if process_pids:
             start_options["process_pids"] = process_pids
         self.engine.start(
@@ -3432,6 +3468,7 @@ class MainFrame(wx.Frame):
     def _on_noise_reduction_toggled(self, event: wx.Event) -> None:
         enabled = self.noise_reduction_checkbox.GetValue()
         previous_enabled = self.preferences.noise_reduction_enabled
+        self.noise_reduction_level.Enable(enabled)
         if not self.engine.is_running:
             self._save_preferences()
             self.SetStatusText(
@@ -3481,6 +3518,24 @@ class MainFrame(wx.Frame):
         self._set_routing_controls_enabled(False)
         self._set_toggle_button_label("Des&ativar mesa")
         self._show_running_state()
+        event.Skip()
+
+    def _on_noise_reduction_level_changed(self, event: wx.Event) -> None:
+        """Apply the dry/wet RNNoise mix without rebuilding the audio route."""
+
+        try:
+            self.engine.update_noise_reduction(
+                self.noise_reduction_checkbox.GetValue(),
+                self.noise_reduction_level.GetValue(),
+            )
+            self._save_preferences()
+            self.SetStatusText(
+                f"Intensidade da redução de ruído em {self.noise_reduction_level.GetValue()} por cento."
+            )
+        except Exception as exc:
+            self._show_error(
+                f"Não foi possível ajustar a redução de ruído.\n\n{exc}"
+            )
         event.Skip()
 
     def _on_spatial_changed(self, event: wx.Event) -> None:

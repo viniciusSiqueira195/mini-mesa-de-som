@@ -296,6 +296,22 @@ class SoundboardSettings:
             raise TypeError("Estado do ducking deve ser verdadeiro ou falso")
 
 
+@dataclass(frozen=True, slots=True)
+class PlaybackEffectsSettings:
+    """Local-only processing for sounds played from the soundboard."""
+
+    reverb_enabled: bool = False
+    delay_enabled: bool = False
+    stereo_width_percent: int = 100
+    volume_percent: int = 100
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.reverb_enabled, bool) or not isinstance(self.delay_enabled, bool):
+            raise TypeError("Os estados dos efeitos locais devem ser verdadeiros ou falsos")
+        _validate_percent("Largura estéreo local", self.stereo_width_percent)
+        _validate_percent("Volume local dos efeitos", self.volume_percent)
+
+
 VALID_RECORDING_FORMATS = ("mp3", "wav", "ogg")
 VALID_RECORDING_BITRATES = (128, 160, 192, 256, 320)
 VALID_RECORDING_MODES = ("both", "voice", "processes")
