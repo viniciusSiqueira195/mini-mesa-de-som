@@ -1217,9 +1217,7 @@ class PedalboardBackend:
                     soundboard_audio * soundboard_duck
                 )
             if self._noise_reducer is not None:
-                clean_input = self._noise_reducer.process(mono_input)
-                level = getattr(self, "_noise_reduction_level", 1.0)
-                mono_input = (mono_input * (1.0 - level)) + (clean_input * level)
+                mono_input = self._noise_reducer.process(mono_input)
             pitch_shifter = getattr(self, "_pitch_shifter", None)
             if pitch_shifter is not None:
                 mono_input = pitch_shifter.process(mono_input)
@@ -1310,7 +1308,9 @@ class PedalboardBackend:
 
     def _apply_playback_effects(self, audio):
         """Return a local-only processed copy for the effects monitor."""
-        settings = self._playback_effects_settings
+        settings = getattr(self, "_playback_effects_settings", None)
+        if settings is None:
+            settings = PlaybackEffectsSettings()
         result = audio.copy() * (settings.volume_percent / 100.0)
         mid = (result[:, 0] + result[:, 1]) * 0.5
         side = (result[:, 0] - result[:, 1]) * 0.5 * (settings.stereo_width_percent / 100.0)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import threading
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from markdown import markdown as render_markdown
 
 from . import __version__
 from .global_hotkeys import GlobalHotkeyManager, modifier_label
+from .single_instance import SingleInstanceController
 from .startup import configure_startup
 from .release_notes import load_release_notes
 from .audio_engine import AudioDependencyError, AudioEngine, match_device_label
@@ -1369,6 +1371,8 @@ class MainFrame(wx.Frame):
         self._tray_icon: SystemTrayIcon | None = None
         self._last_focused_control: wx.Window | None = None
         self._minimize_generation = 0
+        self._restoring_from_tray: bool = False
+        self._last_toggle_time: float = 0.0
         self._update_check_in_progress = False
         self._update_progress_dialog: wx.ProgressDialog | None = None
         self._update_cancel_event: threading.Event | None = None
@@ -3329,7 +3333,11 @@ class MainFrame(wx.Frame):
         # this list available to add or remove transmitted programs live.
         self.process_list.Enable()
         self.refresh_processes_button.Enable()
-        self.noise_reduction_checkbox.Enable()
+        # RNNoise requires a fixed 48 kHz route.  As in the stable main
+        # implementation, changing its on/off state is only safe while the
+        # route is stopped; restarting it here can briefly leave two capture
+        # routes alive and duplicate the voice.
+        self.noise_reduction_checkbox.Enable(enabled)
 
     def _selected_monitor_output(self) -> str | None:
         if not self.monitor_checkbox.GetValue():
@@ -3359,7 +3367,9 @@ class MainFrame(wx.Frame):
         self.engine.update_soundboard_settings(self._soundboard_settings)
         self.engine.update_spatial(self._current_spatial_settings())
         process_pids = self._selected_process_pids()
-        start_options = {}
+        start_options = {
+            "effects_output": self.monitor_choice.GetStringSelection() or None,
+        }
         if process_pids:
             start_options["process_pids"] = process_pids
         self.engine.start(
@@ -3467,57 +3477,13 @@ class MainFrame(wx.Frame):
 
     def _on_noise_reduction_toggled(self, event: wx.Event) -> None:
         enabled = self.noise_reduction_checkbox.GetValue()
-        previous_enabled = self.preferences.noise_reduction_enabled
         self.noise_reduction_level.Enable(enabled)
-        if not self.engine.is_running:
-            self._save_preferences()
-            self.SetStatusText(
-                "Redução de ruído será ativada junto com a mesa."
-                if enabled
-                else "Redução de ruído desativada."
-            )
-            event.Skip()
-            return
-
-        self.SetStatusText("Atualizando a redução de ruído...")
-        try:
-            self.engine.stop()
-            self._start_selected_route()
-        except Exception as update_error:
-            self.noise_reduction_checkbox.SetValue(previous_enabled)
-            try:
-                self.engine.stop()
-                self._start_selected_route()
-            except Exception as restore_error:
-                self._save_preferences()
-                self._set_routing_controls_enabled(True)
-                self._set_toggle_button_label("&Ativar mesa")
-                self.status.ChangeValue("Desativado após falha ao atualizar efeitos.")
-                self._show_error(
-                    "Não foi possível alterar a redução de ruído nem restaurar "
-                    "a rota anterior.\n\n"
-                    f"Falha da alteração: {update_error}\n\n"
-                    f"Falha da restauração: {restore_error}"
-                )
-                event.Skip()
-                return
-
-            self._save_preferences()
-            self._set_routing_controls_enabled(False)
-            self._set_toggle_button_label("Des&ativar mesa")
-            self._show_running_state()
-            self._show_error(
-                "Não foi possível alterar a redução de ruído. "
-                "A configuração anterior foi restaurada.\n\n"
-                f"{update_error}"
-            )
-            event.Skip()
-            return
-
         self._save_preferences()
-        self._set_routing_controls_enabled(False)
-        self._set_toggle_button_label("Des&ativar mesa")
-        self._show_running_state()
+        self.SetStatusText(
+            "Redução de ruído será ativada junto com a mesa."
+            if enabled
+            else "Redução de ruído desativada."
+        )
         event.Skip()
 
     def _on_noise_reduction_level_changed(self, event: wx.Event) -> None:
@@ -3632,19 +3598,40 @@ class MainFrame(wx.Frame):
     def restore_from_tray(self) -> None:
         if self.IsBeingDeleted():
             return
+        self._restoring_from_tray = True
         self._minimize_generation += 1
         self.Show()
         self.Iconize(False)
         self.Raise()
-        wx.CallAfter(self._restore_focus)
+        wx.CallAfter(self._finish_restore_from_tray)
+
+    def _finish_restore_from_tray(self) -> None:
+        self._restoring_from_tray = False
+        self._restore_focus()
 
     def toggle_window_visibility(self) -> None:
         """Show the mixer over other windows, or minimize it back to the tray."""
 
+        self._last_toggle_time = time.monotonic()
+        if self._restoring_from_tray:
+            return
         if not self.IsShown() or self.IsIconized():
             self.restore_from_tray()
             return
         self.Iconize(True)
+
+    def _toggle_from_shortcut_launch(self) -> None:
+        """Toggle visibility when signalled by a second process launch.
+
+        A debounce prevents a duplicate action when the system-wide hotkey
+        (RegisterHotKey) and the .lnk shortcut fire at the same time for the
+        same key combination: the first arrival wins, the second is dropped.
+        """
+        now = time.monotonic()
+        if now - self._last_toggle_time < 0.5:
+            return
+        self._last_toggle_time = now
+        self.toggle_window_visibility()
 
     def _restore_focus(self) -> None:
         if self.IsBeingDeleted() or self.IsIconized() or not self.IsShown():
@@ -3699,15 +3686,24 @@ class MainFrame(wx.Frame):
 
 
 def run() -> int:
+    instance = SingleInstanceController()
+    if not instance.claim():
+        return 0
+
     app = wx.App(False)
     app.SetAppName("Mini Mesa de Som")
     try:
         engine = AudioEngine()
     except AudioDependencyError as exc:
         wx.MessageBox(str(exc), "Mini Mesa de Som", wx.OK | wx.ICON_ERROR)
+        instance.close()
         return 1
 
-    frame = MainFrame(engine)
-    frame.Show()
-    app.MainLoop()
+    try:
+        frame = MainFrame(engine)
+        instance.listen(lambda: wx.CallAfter(frame._toggle_from_shortcut_launch))
+        frame.Show()
+        app.MainLoop()
+    finally:
+        instance.close()
     return 0
