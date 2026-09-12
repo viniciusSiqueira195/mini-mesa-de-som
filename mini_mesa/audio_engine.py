@@ -10,7 +10,12 @@ from pathlib import Path
 from queue import Empty, Full, Queue
 from typing import Protocol
 
-from .noise_reduction import RNNOISE_SAMPLE_RATE, RNNoiseReducer
+from .noise_reduction import (
+    RNNOISE_FRAME_SIZE,
+    RNNOISE_SAMPLE_RATE,
+    RNNoiseReducer,
+    StreamingNoiseReducer,
+)
 from .settings import (
     CreativeEffectSettings,
     ProAudioSettings,
@@ -863,6 +868,7 @@ class PedalboardBackend:
         self._noise_reduction_enabled = False
         self._noise_reduction_level = 1.0
         self._noise_reducer: RNNoiseReducer | None = None
+        self._noise_dry_delay: StreamingNoiseReducer | None = None
         self._processing_lock = threading.Lock()
         self._input_ids: dict[str, list[tuple[int, str]]] = {}
         self._output_ids: dict[str, list[tuple[int, str]]] = {}
@@ -1217,7 +1223,22 @@ class PedalboardBackend:
                     soundboard_audio * soundboard_duck
                 )
             if self._noise_reducer is not None:
-                mono_input = self._noise_reducer.process(mono_input)
+                clean_input = self._noise_reducer.process(mono_input)
+                level = getattr(self, "_noise_reduction_level", 1.0)
+                dry_delay = getattr(self, "_noise_dry_delay", None)
+                if dry_delay is None:
+                    dry_delay = StreamingNoiseReducer(
+                        lambda frame: frame.copy(),
+                        # RNNoise itself emits the previous 10 ms frame and
+                        # StreamingNoiseReducer adds one alignment frame.
+                        initial_delay_frames=RNNOISE_FRAME_SIZE * 2,
+                    )
+                    self._noise_dry_delay = dry_delay
+                dry_input = dry_delay.process(mono_input)
+                if level < 1.0:
+                    mono_input = dry_input * (1.0 - level) + clean_input * level
+                else:
+                    mono_input = clean_input
             pitch_shifter = getattr(self, "_pitch_shifter", None)
             if pitch_shifter is not None:
                 mono_input = pitch_shifter.process(mono_input)
@@ -1802,6 +1823,16 @@ class PedalboardBackend:
         previous = self._noise_reducer
         self._noise_reducer = (
             RNNoiseReducer() if self._noise_reduction_enabled else None
+        )
+        self._noise_dry_delay = (
+            StreamingNoiseReducer(
+                lambda frame: frame.copy(),
+                # Match RNNoise's native one-frame lookbehind plus the
+                # streaming adapter's frame, so dry/wet mixing stays in phase.
+                initial_delay_frames=RNNOISE_FRAME_SIZE * 2,
+            )
+            if self._noise_reducer is not None
+            else None
         )
         if previous is not None:
             previous.close()

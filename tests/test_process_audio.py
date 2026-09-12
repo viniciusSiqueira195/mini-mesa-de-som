@@ -7,7 +7,13 @@ from unittest.mock import Mock, patch
 import numpy as np
 import pytest
 
-from mini_mesa.process_audio import ProcessAudioSource, list_candidate_processes
+from mini_mesa.process_audio import _EXCLUDED, ProcessAudioSource, list_candidate_processes
+
+
+def test_teamtalk_is_not_offered_as_a_transmitted_process() -> None:
+    assert {
+        "teamtalk.exe", "teamtalk5.exe", "teamtalkclassic.exe", "teamtalk5classic.exe",
+    } <= _EXCLUDED
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Comportamento específico do Windows")

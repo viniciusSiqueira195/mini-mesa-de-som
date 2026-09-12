@@ -148,7 +148,13 @@ static std::vector<DWORD> SelectedCaptureTargets(const std::vector<DWORD>& pids)
         // Avoid a duplicate mix: either capture the ordinary root tree or the
         // explicit WebView2 processes that include its AudioService.
         if (webviews.empty()) targets.push_back(root);
-        else targets.insert(targets.end(), webviews.begin(), webviews.end());
+        else {
+            // Each target includes its descendants.  Keep only the topmost
+            // WebView2 processes so nested renderer trees are never captured
+            // twice and summed into the transmission.
+            auto webviewRoots = RootPids(webviews, parents);
+            targets.insert(targets.end(), webviewRoots.begin(), webviewRoots.end());
+        }
     }
     return targets;
 }

@@ -1182,6 +1182,38 @@ class PedalboardProcessingTests(unittest.TestCase):
         np.testing.assert_allclose(effects.received, np.full((1, 4), 0.4))
         np.testing.assert_allclose(output, np.full((4, 2), 0.4))
 
+    def test_noise_reduction_keeps_the_dry_delay_in_sync_at_full_intensity(self) -> None:
+        class FakeNoiseReducer:
+            @staticmethod
+            def process(samples):
+                return samples * 0.5
+
+        class RecordingDryDelay:
+            calls = 0
+
+            def process(self, samples):
+                self.calls += 1
+                return samples
+
+        backend = object.__new__(PedalboardBackend)
+        backend._np = np
+        backend._effects = type("Effects", (), {
+            "process": staticmethod(lambda samples, *_args, **_kwargs: samples),
+        })()
+        backend._noise_reducer = FakeNoiseReducer()
+        backend._noise_dry_delay = RecordingDryDelay()
+        backend._noise_reduction_level = 1.0
+        backend._spatializer = None
+        backend._limiter = None
+        backend._sample_rate = 48_000.0
+        backend._processing_lock = threading.Lock()
+        backend._soundboard = SilentSoundboard()
+
+        output = backend._process_audio(np.full((4, 1), 0.8, dtype=np.float32), 4)
+
+        self.assertEqual(backend._noise_dry_delay.calls, 1)
+        np.testing.assert_allclose(output, np.full((4, 2), 0.4))
+
     def test_soundboard_is_mixed_with_processed_microphone_audio(self) -> None:
         class PassthroughEffects:
             @staticmethod
