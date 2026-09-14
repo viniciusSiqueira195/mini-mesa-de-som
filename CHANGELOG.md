@@ -1,5 +1,41 @@
 # Histórico de versões
 
+## 1.2.5 — 2026-09-14
+
+Esta versão melhora a continuidade do áudio e dá mais controle sobre a limpeza
+e os modificadores de voz. Também facilita abrir e esconder a Mini Mesa durante
+uma chamada e evita que o programa seja iniciado duas vezes.
+
+### Áudio e limpeza da voz
+
+- A redução de ruído agora possui intensidade ajustável de 0 a 100, permitindo
+  equilibrar a remoção de ruído com a naturalidade da voz.
+- O modificador de voz ganhou um modo de compatibilidade opcional. Ele usa mais
+  margem de áudio para reduzir cortes em computadores e dispositivos que exigem
+  maior estabilidade, com o custo de um pequeno aumento no atraso.
+- Foram corrigidas rotas que podiam manter duas cópias da voz ao usar a redução
+  de ruído.
+- Ajustes internos melhoram a continuidade do áudio e reduzem falhas breves na
+  reprodução e no retorno local.
+
+### Janela e inicialização
+
+- Em Atalhos globais, agora é possível configurar uma combinação própria para
+  mostrar a Mini Mesa sobre os outros programas ou minimizá-la novamente.
+- A mesma tela oferece a opção de iniciar a Mini Mesa com o Windows. Ela vem
+  desligada por padrão e abre o aplicativo sem ativar a transmissão de áudio.
+- Ao abrir a Mini Mesa uma segunda vez, a instância já aberta é mostrada ou
+  minimizada, em vez de criar duas mesas que poderiam disputar os dispositivos.
+- A restauração da janela pela bandeja e pelo atalho recebeu proteção contra
+  acionamentos duplicados.
+
+### Interface
+
+- Os controles de voz, efeitos criativos, reverb e redução de ruído foram
+  reorganizados para manter a navegação correta por teclado e leitor de telas.
+- A lista de dispositivos de retorno descreve com mais clareza as saídas locais
+  compatíveis.
+
 ## 1.2.4 — 2026-09-09
 
 A Mini Mesa de Som agora grava suas transmissões em arquivo e permite mudar os
