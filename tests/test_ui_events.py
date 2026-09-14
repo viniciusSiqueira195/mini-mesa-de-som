@@ -94,10 +94,12 @@ class VoiceControlTests(unittest.TestCase):
                 voice_checkbox=_FakeControl(value=enabled),
                 voice_preset_choice=_FakeControl(),
                 voice_pitch=_FakeControl(),
+                voice_compatibility=_FakeControl(),
             )
             ui.MainFrame._update_voice_controls(frame)
             self.assertEqual(frame.voice_preset_choice.enabled, enabled)
             self.assertEqual(frame.voice_pitch.enabled, enabled)
+            self.assertEqual(frame.voice_compatibility.enabled, enabled)
 
 
 class ProcessSelectionAnnouncementTests(unittest.TestCase):
@@ -179,8 +181,10 @@ class ProcessSelectionAnnouncementTests(unittest.TestCase):
 
         frame = types.SimpleNamespace(
             input_choice=Control(), output_choice=Control(), monitor_checkbox=Control(),
-            monitor_choice=Control(), refresh_button=Control(), process_list=Control(),
-            refresh_processes_button=Control(), noise_reduction_checkbox=Control(),
+            monitor_choice=Control(), playback_output_choice=Control(),
+            refresh_button=Control(), process_list=Control(),
+            refresh_processes_button=Control(), playback_process_list=Control(),
+            refresh_playback_processes_button=Control(), noise_reduction_checkbox=Control(),
         )
 
         ui.MainFrame._set_routing_controls_enabled(frame, False)
@@ -188,6 +192,7 @@ class ProcessSelectionAnnouncementTests(unittest.TestCase):
         self.assertEqual(frame.input_choice.calls, [(False,)])
         self.assertEqual(frame.process_list.calls, [()])
         self.assertEqual(frame.refresh_processes_button.calls, [()])
+        self.assertEqual(frame.noise_reduction_checkbox.calls, [(False,)])
 
 
 
@@ -245,18 +250,35 @@ class ApplicationEngineTests(unittest.TestCase):
         app = unittest.mock.Mock()
         frame = unittest.mock.Mock()
         engine = object()
+        instance = unittest.mock.Mock()
+        instance.claim.return_value = True
         with (
             patch.object(ui.wx, "App", return_value=app),
             patch.object(ui, "AudioEngine", return_value=engine) as constructor,
             patch.object(ui, "MainFrame", return_value=frame) as main_frame,
+            patch.object(ui, "SingleInstanceController", return_value=instance),
         ):
             result = ui.run()
 
         self.assertEqual(result, 0)
         constructor.assert_called_once_with()
         main_frame.assert_called_once_with(engine)
+        instance.listen.assert_called_once()
+        instance.close.assert_called_once_with()
         frame.Show.assert_called_once_with()
         app.MainLoop.assert_called_once_with()
+
+    def test_second_shortcut_launch_exits_before_starting_another_audio_engine(self) -> None:
+        instance = unittest.mock.Mock()
+        instance.claim.return_value = False
+        with (
+            patch.object(ui, "SingleInstanceController", return_value=instance),
+            patch.object(ui, "AudioEngine") as constructor,
+        ):
+            result = ui.run()
+
+        self.assertEqual(result, 0)
+        constructor.assert_not_called()
 
 
 class HelpContentTests(unittest.TestCase):

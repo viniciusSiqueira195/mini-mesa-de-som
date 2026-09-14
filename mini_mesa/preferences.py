@@ -86,6 +86,7 @@ class AppPreferences:
     reverb_enabled: bool = True
     reverb_level: int = 25
     noise_reduction_enabled: bool = False
+    noise_reduction_level_percent: int = 100
     spatial_enabled: bool = False
     spatial_x: int = 0
     spatial_y: int = 0
@@ -95,6 +96,7 @@ class AppPreferences:
     voice_enabled: bool = False
     voice_preset: str = "female"
     voice_pitch_semitones: float = 4.0
+    voice_compatibility_mode: bool = False
     creative_effect_preset: str = "none"
     modulation_effect: str = "none"
     ambience_preset: str = "none"
@@ -117,6 +119,10 @@ class AppPreferences:
     soundboard_volume_percent: int = 80
     soundboard_ducking_enabled: bool = False
     soundboard_ducking_percent: int = 60
+    playback_reverb_enabled: bool = False
+    playback_delay_enabled: bool = False
+    playback_stereo_width_percent: int = 100
+    playback_volume_percent: int = 100
     recording_format: str = "mp3"
     recording_bitrate_kbps: int = 192
     recording_mode: str = "both"
@@ -130,6 +136,10 @@ class AppPreferences:
     global_shortcuts_enabled: bool = False
     global_effect_modifier: str = "control"
     global_page_modifier: str = "alt"
+    window_toggle_shortcut_enabled: bool = False
+    window_toggle_shortcut_modifier: str = "control_alt"
+    window_toggle_shortcut_key: str = "M"
+    launch_at_startup: bool = False
     feedback_sounds_enabled: bool = False
 
     @property
@@ -291,6 +301,22 @@ class AppPreferences:
             global_page_modifier=text_value("global_page_modifier", "alt")
             if text_value("global_page_modifier", "alt") in {"alt", "alt_shift"}
             else "alt",
+            window_toggle_shortcut_enabled=bool_value(
+                "window_toggle_shortcut_enabled", False
+            ),
+            window_toggle_shortcut_modifier=text_value(
+                "window_toggle_shortcut_modifier", "control_alt"
+            )
+            if text_value("window_toggle_shortcut_modifier", "control_alt")
+            in {"control", "control_shift", "control_alt", "alt", "alt_shift"}
+            else "control_alt",
+            window_toggle_shortcut_key=text_value(
+                "window_toggle_shortcut_key", "M"
+            )
+            if text_value("window_toggle_shortcut_key", "M")
+            in tuple("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+            else "M",
+            launch_at_startup=bool_value("launch_at_startup", False),
             feedback_sounds_enabled=bool_value("feedback_sounds_enabled", False),
             last_seen_news_version=text_value("last_seen_news_version", ""),
             welcome_shown=bool_value("welcome_shown", defaults.welcome_shown),
@@ -308,6 +334,10 @@ class AppPreferences:
             noise_reduction_enabled=bool_value(
                 "noise_reduction_enabled", defaults.noise_reduction_enabled
             ),
+            noise_reduction_level_percent=percent_value(
+                "noise_reduction_level_percent",
+                defaults.noise_reduction_level_percent,
+            ),
             spatial_enabled=bool_value("spatial_enabled", defaults.spatial_enabled),
             spatial_x=spatial_x,
             spatial_y=spatial_y,
@@ -319,6 +349,9 @@ class AppPreferences:
             voice_enabled=bool_value("voice_enabled", defaults.voice_enabled) and not removed_voice_preset,
             voice_preset=voice_preset,
             voice_pitch_semitones=voice_pitch,
+            voice_compatibility_mode=bool_value(
+                "voice_compatibility_mode", defaults.voice_compatibility_mode
+            ),
             creative_effect_preset=preset,
             modulation_effect=modulation,
             ambience_preset=ambience,

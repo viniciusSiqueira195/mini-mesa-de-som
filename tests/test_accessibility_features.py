@@ -154,6 +154,10 @@ class AccessibilityFeatureTests(unittest.TestCase):
             with self.subTest(control=expected):
                 self.assertEqual(control.GetLabel(), expected)
                 self.assertEqual(control.GetName(), expected)
+        self.assertEqual(
+            self.frame.voice_compatibility.GetName(),
+            "Ativar modo de compatibilidade (reduz cortes e aumenta o atraso)",
+        )
         self.assertEqual(self.frame.notebook.GetLabel(), "Guias da mesa de som")
         self.assertEqual(
             soundboard.effect_list.GetLabel(), "Lista de efeitos sonoros"
@@ -162,6 +166,13 @@ class AccessibilityFeatureTests(unittest.TestCase):
 
         dialog = ui.HotkeySettingsDialog(self.frame, self.store.load())
         try:
+            self.assertEqual(
+                dialog.window_toggle_modifier.GetName(),
+                "Modificador do atalho da Mini Mesa",
+            )
+            self.assertEqual(
+                dialog.window_toggle_key.GetName(), "Tecla do atalho da Mini Mesa"
+            )
             self.assertEqual(
                 dialog.effect_modifier.GetName(), "Modificador para tocar efeitos"
             )

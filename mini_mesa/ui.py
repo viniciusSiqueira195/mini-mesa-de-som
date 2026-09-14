@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import threading
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -12,6 +13,8 @@ from markdown import markdown as render_markdown
 
 from . import __version__
 from .global_hotkeys import GlobalHotkeyManager, modifier_label
+from .single_instance import SingleInstanceController
+from .startup import configure_startup
 from .release_notes import load_release_notes
 from .audio_engine import AudioDependencyError, AudioEngine, match_device_label
 from .preferences import AppPreferences, PersonalSound, PreferencesStore
@@ -1229,6 +1232,8 @@ class DiagnosticDialog(wx.Dialog):
 class HotkeySettingsDialog(wx.Dialog):
     _EFFECT_VALUES = ("control", "control_alt")
     _PAGE_VALUES = ("alt", "alt_shift")
+    _WINDOW_VALUES = ("control", "control_shift", "control_alt", "alt", "alt_shift")
+    _WINDOW_KEYS = tuple("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
 
     def __init__(self, parent: wx.Window, preferences: AppPreferences) -> None:
         super().__init__(parent, title="Atalhos globais")
@@ -1256,6 +1261,44 @@ class HotkeySettingsDialog(wx.Dialog):
         )
         self.page_modifier.SetSelection(self._PAGE_VALUES.index(preferences.global_page_modifier))
         root.Add(self.page_modifier, 0, wx.ALL | wx.EXPAND, 12)
+        self.window_toggle_enabled = wx.CheckBox(
+            self, label="Ativar atalho para mostrar ou minimizar a &Mini Mesa"
+        )
+        self.window_toggle_enabled.SetValue(preferences.window_toggle_shortcut_enabled)
+        self.window_toggle_enabled.Bind(wx.EVT_CHECKBOX, self._update_window_toggle_controls)
+        root.Add(self.window_toggle_enabled, 0, wx.ALL | wx.EXPAND, 12)
+        root.Add(wx.StaticText(self, label="Modificador do atalho da Mini Mesa:"), 0, wx.LEFT | wx.RIGHT, 12)
+        self.window_toggle_modifier = wx.Choice(
+            self, choices=[modifier_label(value) for value in self._WINDOW_VALUES]
+        )
+        _set_choice_accessible_name(
+            self.window_toggle_modifier, "Modificador do atalho da Mini Mesa"
+        )
+        self.window_toggle_modifier.SetSelection(
+            self._WINDOW_VALUES.index(preferences.window_toggle_shortcut_modifier)
+        )
+        root.Add(self.window_toggle_modifier, 0, wx.ALL | wx.EXPAND, 12)
+        root.Add(wx.StaticText(self, label="Tecla do atalho da Mini Mesa:"), 0, wx.LEFT | wx.RIGHT, 12)
+        self.window_toggle_key = wx.Choice(self, choices=self._WINDOW_KEYS)
+        _set_choice_accessible_name(self.window_toggle_key, "Tecla do atalho da Mini Mesa")
+        self.window_toggle_key.SetSelection(
+            self._WINDOW_KEYS.index(preferences.window_toggle_shortcut_key)
+        )
+        root.Add(self.window_toggle_key, 0, wx.ALL | wx.EXPAND, 12)
+        self.launch_at_startup = wx.CheckBox(
+            self, label="Iniciar a Mini Mesa com o &Windows"
+        )
+        self.launch_at_startup.SetValue(preferences.launch_at_startup)
+        root.Add(self.launch_at_startup, 0, wx.ALL | wx.EXPAND, 12)
+        root.Add(
+            wx.StaticText(
+                self,
+                label="A inicialização abre a Mini Mesa, mas não ativa a transmissão de áudio.",
+            ),
+            0,
+            wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND,
+            12,
+        )
         root.Add(
             wx.StaticText(
                 self,
@@ -1275,12 +1318,25 @@ class HotkeySettingsDialog(wx.Dialog):
         root.Add(buttons, 0, wx.ALL | wx.EXPAND, 12)
         self.SetSizerAndFit(root)
 
+        self._update_window_toggle_controls(None)
+
+    def _update_window_toggle_controls(self, event: wx.CommandEvent | None) -> None:
+        enabled = self.window_toggle_enabled.GetValue()
+        self.window_toggle_modifier.Enable(enabled)
+        self.window_toggle_key.Enable(enabled)
+        if event is not None:
+            event.Skip()
+
     @property
-    def values(self) -> tuple[bool, str, str]:
+    def values(self) -> tuple[bool, str, str, bool, str, str, bool]:
         return (
             self.enabled.GetValue(),
             self._EFFECT_VALUES[self.effect_modifier.GetSelection()],
             self._PAGE_VALUES[self.page_modifier.GetSelection()],
+            self.window_toggle_enabled.GetValue(),
+            self._WINDOW_VALUES[self.window_toggle_modifier.GetSelection()],
+            self._WINDOW_KEYS[self.window_toggle_key.GetSelection()],
+            self.launch_at_startup.GetValue(),
         )
 
 
@@ -1315,6 +1371,8 @@ class MainFrame(wx.Frame):
         self._tray_icon: SystemTrayIcon | None = None
         self._last_focused_control: wx.Window | None = None
         self._minimize_generation = 0
+        self._restoring_from_tray: bool = False
+        self._last_toggle_time: float = 0.0
         self._update_check_in_progress = False
         self._update_progress_dialog: wx.ProgressDialog | None = None
         self._update_cancel_event: threading.Event | None = None
@@ -1466,6 +1524,8 @@ class MainFrame(wx.Frame):
         )
         self.reverb_level.Enable(self.preferences.reverb_enabled)
         self.reverb_level.Bind(wx.EVT_SLIDER, self._on_settings_changed)
+        level_label.Reparent(box_effect)
+        self.reverb_level.Reparent(box_effect)
         effect.Add(self.reverb_checkbox, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
         effect.Add(level_label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
         effect.Add(self.reverb_level, 0, wx.ALL | wx.EXPAND, 8)
@@ -1509,11 +1569,22 @@ class MainFrame(wx.Frame):
         self.voice_pitch.Enable(self.preferences.voice_enabled)
         self.voice_pitch.Bind(wx.EVT_SLIDER, self._on_voice_changed)
 
+        self.voice_compatibility = EffectToggleButton(
+            box_voice,
+            label="Ativar modo de &compatibilidade (reduz cortes e aumenta o atraso)",
+        )
+        self.voice_compatibility.SetValue(self.preferences.voice_compatibility_mode)
+        self.voice_compatibility.Enable(self.preferences.voice_enabled)
+        self.voice_compatibility.BindToggle(self._on_voice_changed)
+        for control in (voice_preset_label, self.voice_preset_choice, voice_pitch_label,
+                        self.voice_pitch, self.voice_compatibility):
+            control.Reparent(box_voice)
         voice_box.Add(self.voice_checkbox, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
         voice_box.Add(voice_preset_label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
         voice_box.Add(self.voice_preset_choice, 0, wx.ALL | wx.EXPAND, 8)
         voice_box.Add(voice_pitch_label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
         voice_box.Add(self.voice_pitch, 0, wx.ALL | wx.EXPAND, 8)
+        voice_box.Add(self.voice_compatibility, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 8)
         voice_root.Add(voice_box, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
         self.voice_preset_choice.SetSelection(
             next(
@@ -1649,7 +1720,14 @@ class MainFrame(wx.Frame):
         )
         self.delay_level.Enable(self.preferences.delay_enabled)
         self.delay_level.Bind(wx.EVT_SLIDER, self._on_creative_changed)
-
+        for control in (creative_label, self.creative_choice, modulation_label,
+                        self.modulation_choice, ambience_label, self.ambience_choice,
+                        style_intensity_label, self.style_intensity,
+                        modulation_intensity_label, self.modulation_intensity,
+                        ambience_intensity_label, self.ambience_intensity,
+                        self.roger_beep_checkbox, self.delay_checkbox, delay_label,
+                        self.delay_level):
+            control.Reparent(box_creative)
         creative_box.Add(creative_label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
         creative_box.Add(self.creative_choice, 0, wx.ALL | wx.EXPAND, 8)
         creative_box.Add(modulation_label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
@@ -1773,12 +1851,29 @@ class MainFrame(wx.Frame):
             self.preferences.noise_reduction_enabled
         )
         self.noise_reduction_checkbox.BindToggle(self._on_noise_reduction_toggled)
+        self.noise_reduction_level = wx.Slider(
+            box_noise,
+            value=self.preferences.noise_reduction_level_percent,
+            minValue=0,
+            maxValue=100,
+            style=wx.SL_HORIZONTAL | wx.SL_LABELS,
+        )
+        self._noise_reduction_level_accessible = _set_slider_accessible_name(
+            self.noise_reduction_level, "Intensidade da redução de ruído"
+        )
+        self.noise_reduction_level.Enable(self.preferences.noise_reduction_enabled)
+        self.noise_reduction_level.Bind(wx.EVT_SLIDER, self._on_noise_reduction_level_changed)
         noise_reduction.Add(
             self.noise_reduction_checkbox,
             0,
-            wx.LEFT | wx.RIGHT | wx.TOP | wx.BOTTOM,
+            wx.LEFT | wx.RIGHT | wx.TOP,
             8,
         )
+        noise_reduction.Add(
+            wx.StaticText(box_noise, label="Intensidade da redução de ruído (0 a 100):"),
+            0, wx.LEFT | wx.RIGHT | wx.TOP, 8,
+        )
+        noise_reduction.Add(self.noise_reduction_level, 0, wx.ALL | wx.EXPAND, 8)
         cleanup_root.Add(
             noise_reduction,
             0,
@@ -2143,6 +2238,10 @@ class MainFrame(wx.Frame):
                 play=self.soundboard_panel.play_index,
                 select_page=lambda page: self.soundboard_panel.select_page(page, focus=False),
                 stop=self.stop_sound_effects,
+                toggle_window=self.toggle_window_visibility,
+                window_toggle_enabled=self.preferences.window_toggle_shortcut_enabled,
+                window_toggle_modifier=self.preferences.window_toggle_shortcut_modifier,
+                window_toggle_key=self.preferences.window_toggle_shortcut_key,
             )
             return True
         except RuntimeError as exc:
@@ -2161,7 +2260,15 @@ class MainFrame(wx.Frame):
         try:
             if dialog.ShowModal() != wx.ID_OK:
                 return
-            enabled, effect_modifier, page_modifier = dialog.values
+            (
+                enabled,
+                effect_modifier,
+                page_modifier,
+                window_toggle_enabled,
+                window_toggle_modifier,
+                window_toggle_key,
+                launch_at_startup,
+            ) = dialog.values
         finally:
             dialog.Destroy()
         previous = self.preferences
@@ -2170,15 +2277,24 @@ class MainFrame(wx.Frame):
             global_shortcuts_enabled=enabled,
             global_effect_modifier=effect_modifier,
             global_page_modifier=page_modifier,
+            window_toggle_shortcut_enabled=window_toggle_enabled,
+            window_toggle_shortcut_modifier=window_toggle_modifier,
+            window_toggle_shortcut_key=window_toggle_key,
+            launch_at_startup=launch_at_startup,
         )
         if not self._apply_global_hotkeys():
             return
         try:
+            configure_startup(launch_at_startup)
             self.preferences_store.save(self.preferences)
-        except OSError as exc:
+        except (OSError, RuntimeError) as exc:
             self.preferences = previous
             self._apply_global_hotkeys(show_error=False)
-            self._show_error(f"Não foi possível salvar os atalhos globais.\n\n{exc}")
+            try:
+                configure_startup(previous.launch_at_startup)
+            except (OSError, RuntimeError):
+                pass
+            self._show_error(f"Não foi possível salvar as configurações.\n\n{exc}")
             return
         self.SetStatusText(
             "Atalhos globais ativados."
@@ -2690,6 +2806,12 @@ class MainFrame(wx.Frame):
             self._show_error(f"Não foi possível listar os dispositivos de áudio.\n\n{exc}")
             return
 
+        # A local monitor must never point to the same endpoint used to feed
+        # Discord/TeamTalk.  Some virtual cables are named "CABLE Input" and
+        # do not contain the word "virtual", so filtering only by name is not
+        # sufficient here.
+        local_outputs = monitor_outputs
+
         self._replace_choices(
             self.input_choice,
             inputs,
@@ -2704,13 +2826,13 @@ class MainFrame(wx.Frame):
         )
         self._replace_choices(
             self.monitor_choice,
-            monitor_outputs,
+            local_outputs,
             selected_monitor,
             prefer_physical_output=True,
         )
         self.SetStatusText(
             f"{len(inputs)} entradas, {len(outputs)} saídas e "
-            f"{len(monitor_outputs)} retornos compatíveis encontrados."
+            f"{len(local_outputs)} retornos locais compatíveis encontrados."
         )
 
     @staticmethod
@@ -2806,6 +2928,7 @@ class MainFrame(wx.Frame):
             reverb_enabled=self.reverb_checkbox.GetValue(),
             reverb_level=self.reverb_level.GetValue(),
             noise_reduction_enabled=self.noise_reduction_checkbox.GetValue(),
+            noise_reduction_level_percent=self.noise_reduction_level.GetValue(),
             spatial_enabled=self.spatial_checkbox.GetValue(),
             spatial_x=self.spatial_x.GetValue(),
             spatial_y=self.spatial_y.GetValue(),
@@ -2815,6 +2938,7 @@ class MainFrame(wx.Frame):
             voice_enabled=self.voice_checkbox.GetValue(),
             voice_preset=voice_preset,
             voice_pitch_semitones=float(self.voice_pitch.GetValue()),
+            voice_compatibility_mode=self.voice_compatibility.GetValue(),
             creative_effect_preset=preset,
             modulation_effect=_MODULATIONS[self.modulation_choice.GetSelection()][0],
             ambience_preset=_AMBIENCES[self.ambience_choice.GetSelection()][0],
@@ -2840,6 +2964,10 @@ class MainFrame(wx.Frame):
             global_shortcuts_enabled=self.preferences.global_shortcuts_enabled,
             global_effect_modifier=self.preferences.global_effect_modifier,
             global_page_modifier=self.preferences.global_page_modifier,
+            window_toggle_shortcut_enabled=self.preferences.window_toggle_shortcut_enabled,
+            window_toggle_shortcut_modifier=self.preferences.window_toggle_shortcut_modifier,
+            window_toggle_shortcut_key=self.preferences.window_toggle_shortcut_key,
+            launch_at_startup=self.preferences.launch_at_startup,
             feedback_sounds_enabled=self.preferences.feedback_sounds_enabled,
             soundboard_volume_percent=self._soundboard_settings.volume_percent,
             soundboard_ducking_enabled=self._soundboard_settings.ducking_enabled,
@@ -2864,6 +2992,8 @@ class MainFrame(wx.Frame):
         self.reverb_level.SetValue(preferences.reverb_level)
         self.reverb_level.Enable(preferences.reverb_enabled)
         self.noise_reduction_checkbox.SetValue(preferences.noise_reduction_enabled)
+        self.noise_reduction_level.SetValue(preferences.noise_reduction_level_percent)
+        self.noise_reduction_level.Enable(preferences.noise_reduction_enabled)
         self.spatial_checkbox.SetValue(preferences.spatial_enabled)
         self.spatial_x.SetValue(preferences.spatial_x)
         self.spatial_y.SetValue(preferences.spatial_y)
@@ -2876,6 +3006,7 @@ class MainFrame(wx.Frame):
             index for index, item in enumerate(_VOICE_PRESETS) if item[0] == preferences.voice_preset
         ))
         self.voice_pitch.SetValue(round(preferences.voice_pitch_semitones))
+        self.voice_compatibility.SetValue(preferences.voice_compatibility_mode)
         self._update_voice_controls()
         self.creative_choice.SetSelection(next(
             index for index, item in enumerate(_STYLE_PRESETS)
@@ -2969,6 +3100,7 @@ class MainFrame(wx.Frame):
             enabled=self.voice_checkbox.GetValue(),
             preset=_VOICE_PRESETS[self.voice_preset_choice.GetSelection()][0],
             pitch_semitones=float(self.voice_pitch.GetValue()),
+            compatibility_mode=self.voice_compatibility.GetValue(),
         )
 
     def _current_creative_settings(self) -> CreativeEffectSettings:
@@ -3025,6 +3157,7 @@ class MainFrame(wx.Frame):
         enabled = self.voice_checkbox.GetValue()
         self.voice_preset_choice.Enable(enabled)
         self.voice_pitch.Enable(enabled)
+        self.voice_compatibility.Enable(enabled)
 
     def _update_creative_controls(self) -> None:
         self.delay_level.Enable(self.delay_checkbox.GetValue())
@@ -3200,7 +3333,11 @@ class MainFrame(wx.Frame):
         # this list available to add or remove transmitted programs live.
         self.process_list.Enable()
         self.refresh_processes_button.Enable()
-        self.noise_reduction_checkbox.Enable()
+        # RNNoise requires a fixed 48 kHz route.  As in the stable main
+        # implementation, changing its on/off state is only safe while the
+        # route is stopped; restarting it here can briefly leave two capture
+        # routes alive and duplicate the voice.
+        self.noise_reduction_checkbox.Enable(enabled)
 
     def _selected_monitor_output(self) -> str | None:
         if not self.monitor_checkbox.GetValue():
@@ -3220,7 +3357,8 @@ class MainFrame(wx.Frame):
         if setter is not None:
             setter(self.microphone_volume.GetValue() / 100.0, self.process_volume.GetValue() / 100.0)
         self.engine.update_noise_reduction(
-            self.noise_reduction_checkbox.GetValue()
+            self.noise_reduction_checkbox.GetValue(),
+            self.noise_reduction_level.GetValue(),
         )
         self.engine.update_settings(self._current_settings())
         self.engine.update_voice_settings(self._current_voice_settings())
@@ -3339,56 +3477,31 @@ class MainFrame(wx.Frame):
 
     def _on_noise_reduction_toggled(self, event: wx.Event) -> None:
         enabled = self.noise_reduction_checkbox.GetValue()
-        previous_enabled = self.preferences.noise_reduction_enabled
-        if not self.engine.is_running:
+        self.noise_reduction_level.Enable(enabled)
+        self._save_preferences()
+        self.SetStatusText(
+            "Redução de ruído será ativada junto com a mesa."
+            if enabled
+            else "Redução de ruído desativada."
+        )
+        event.Skip()
+
+    def _on_noise_reduction_level_changed(self, event: wx.Event) -> None:
+        """Apply the dry/wet RNNoise mix without rebuilding the audio route."""
+
+        try:
+            self.engine.update_noise_reduction(
+                self.noise_reduction_checkbox.GetValue(),
+                self.noise_reduction_level.GetValue(),
+            )
             self._save_preferences()
             self.SetStatusText(
-                "Redução de ruído será ativada junto com a mesa."
-                if enabled
-                else "Redução de ruído desativada."
+                f"Intensidade da redução de ruído em {self.noise_reduction_level.GetValue()} por cento."
             )
-            event.Skip()
-            return
-
-        self.SetStatusText("Atualizando a redução de ruído...")
-        try:
-            self.engine.stop()
-            self._start_selected_route()
-        except Exception as update_error:
-            self.noise_reduction_checkbox.SetValue(previous_enabled)
-            try:
-                self.engine.stop()
-                self._start_selected_route()
-            except Exception as restore_error:
-                self._save_preferences()
-                self._set_routing_controls_enabled(True)
-                self._set_toggle_button_label("&Ativar mesa")
-                self.status.ChangeValue("Desativado após falha ao atualizar efeitos.")
-                self._show_error(
-                    "Não foi possível alterar a redução de ruído nem restaurar "
-                    "a rota anterior.\n\n"
-                    f"Falha da alteração: {update_error}\n\n"
-                    f"Falha da restauração: {restore_error}"
-                )
-                event.Skip()
-                return
-
-            self._save_preferences()
-            self._set_routing_controls_enabled(False)
-            self._set_toggle_button_label("Des&ativar mesa")
-            self._show_running_state()
+        except Exception as exc:
             self._show_error(
-                "Não foi possível alterar a redução de ruído. "
-                "A configuração anterior foi restaurada.\n\n"
-                f"{update_error}"
+                f"Não foi possível ajustar a redução de ruído.\n\n{exc}"
             )
-            event.Skip()
-            return
-
-        self._save_preferences()
-        self._set_routing_controls_enabled(False)
-        self._set_toggle_button_label("Des&ativar mesa")
-        self._show_running_state()
         event.Skip()
 
     def _on_spatial_changed(self, event: wx.Event) -> None:
@@ -3485,11 +3598,40 @@ class MainFrame(wx.Frame):
     def restore_from_tray(self) -> None:
         if self.IsBeingDeleted():
             return
+        self._restoring_from_tray = True
         self._minimize_generation += 1
         self.Show()
         self.Iconize(False)
         self.Raise()
-        wx.CallAfter(self._restore_focus)
+        wx.CallAfter(self._finish_restore_from_tray)
+
+    def _finish_restore_from_tray(self) -> None:
+        self._restoring_from_tray = False
+        self._restore_focus()
+
+    def toggle_window_visibility(self) -> None:
+        """Show the mixer over other windows, or minimize it back to the tray."""
+
+        self._last_toggle_time = time.monotonic()
+        if self._restoring_from_tray:
+            return
+        if not self.IsShown() or self.IsIconized():
+            self.restore_from_tray()
+            return
+        self.Iconize(True)
+
+    def _toggle_from_shortcut_launch(self) -> None:
+        """Toggle visibility when signalled by a second process launch.
+
+        A debounce prevents a duplicate action when the system-wide hotkey
+        (RegisterHotKey) and the .lnk shortcut fire at the same time for the
+        same key combination: the first arrival wins, the second is dropped.
+        """
+        now = time.monotonic()
+        if now - self._last_toggle_time < 0.5:
+            return
+        self._last_toggle_time = now
+        self.toggle_window_visibility()
 
     def _restore_focus(self) -> None:
         if self.IsBeingDeleted() or self.IsIconized() or not self.IsShown():
@@ -3544,15 +3686,24 @@ class MainFrame(wx.Frame):
 
 
 def run() -> int:
+    instance = SingleInstanceController()
+    if not instance.claim():
+        return 0
+
     app = wx.App(False)
     app.SetAppName("Mini Mesa de Som")
     try:
         engine = AudioEngine()
     except AudioDependencyError as exc:
         wx.MessageBox(str(exc), "Mini Mesa de Som", wx.OK | wx.ICON_ERROR)
+        instance.close()
         return 1
 
-    frame = MainFrame(engine)
-    frame.Show()
-    app.MainLoop()
+    try:
+        frame = MainFrame(engine)
+        instance.listen(lambda: wx.CallAfter(frame._toggle_from_shortcut_launch))
+        frame.Show()
+        app.MainLoop()
+    finally:
+        instance.close()
     return 0

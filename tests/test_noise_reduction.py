@@ -34,6 +34,29 @@ class StreamingNoiseReducerTests(unittest.TestCase):
         np.testing.assert_array_equal(output[:4], np.zeros(4, dtype=np.float32))
         np.testing.assert_allclose(output[4:], np.full(8, 0.25, dtype=np.float32))
 
+    def test_partial_reduction_aligns_dry_and_clean_audio_before_mixing(self) -> None:
+        previous = np.zeros(4, dtype=np.float32)
+
+        def native_rnnoise_delay(frame: np.ndarray) -> np.ndarray:
+            nonlocal previous
+            result = previous * 0.5
+            previous = frame.copy()
+            return result
+
+        clean = StreamingNoiseReducer(native_rnnoise_delay, frame_size=4)
+        dry = StreamingNoiseReducer(
+            lambda frame: frame.copy(), frame_size=4, initial_delay_frames=8
+        )
+        source = np.arange(12, dtype=np.float32)
+
+        mixed = np.concatenate([
+            dry.process(source[:5]) * 0.5 + clean.process(source[:5]) * 0.5,
+            dry.process(source[5:]) * 0.5 + clean.process(source[5:]) * 0.5,
+        ])
+
+        np.testing.assert_array_equal(mixed[:8], np.zeros(8, dtype=np.float32))
+        np.testing.assert_allclose(mixed[8:], source[:-8] * 0.75)
+
 
 class RNNoiseLifecycleTests(unittest.TestCase):
     def test_close_waits_for_an_in_progress_native_frame(self) -> None:

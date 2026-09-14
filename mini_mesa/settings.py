@@ -106,6 +106,7 @@ class VoiceSettings:
     preset: str = "custom"
     pitch_semitones: float = 4.0
     highpass_cutoff: float = 120.0
+    compatibility_mode: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.enabled, bool):
@@ -124,6 +125,8 @@ class VoiceSettings:
             raise TypeError("Frequência de corte do filtro deve ser um número")
         if not 20.0 <= float(self.highpass_cutoff) <= 500.0:
             raise ValueError("Frequência do filtro deve estar entre 20.0 e 500.0 Hz")
+        if not isinstance(self.compatibility_mode, bool):
+            raise TypeError("Modo de compatibilidade deve ser verdadeiro ou falso")
 
 
 VALID_VOICE_PRESETS = (
@@ -291,6 +294,22 @@ class SoundboardSettings:
         _validate_percent("Ducking do soundboard", self.ducking_percent)
         if not isinstance(self.ducking_enabled, bool):
             raise TypeError("Estado do ducking deve ser verdadeiro ou falso")
+
+
+@dataclass(frozen=True, slots=True)
+class PlaybackEffectsSettings:
+    """Local-only processing for sounds played from the soundboard."""
+
+    reverb_enabled: bool = False
+    delay_enabled: bool = False
+    stereo_width_percent: int = 100
+    volume_percent: int = 100
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.reverb_enabled, bool) or not isinstance(self.delay_enabled, bool):
+            raise TypeError("Os estados dos efeitos locais devem ser verdadeiros ou falsos")
+        _validate_percent("Largura estéreo local", self.stereo_width_percent)
+        _validate_percent("Volume local dos efeitos", self.volume_percent)
 
 
 VALID_RECORDING_FORMATS = ("mp3", "wav", "ogg")

@@ -34,6 +34,10 @@ class VoiceSettingsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             VoiceSettings(pitch_semitones=-13.0)
 
+    def test_compatibility_mode_must_be_boolean(self) -> None:
+        with self.assertRaises(TypeError):
+            VoiceSettings(compatibility_mode="yes")  # type: ignore[arg-type]
+
     def test_invalid_types_rejected(self) -> None:
         with self.assertRaises(TypeError):
             VoiceSettings(enabled="yes")  # type: ignore[arg-type]
@@ -147,6 +151,7 @@ class PreferencesVoiceTests(unittest.TestCase):
             "voice_enabled": True,
             "voice_preset": "monster",
             "voice_pitch_semitones": 5.0,
+            "voice_compatibility_mode": True,
             "creative_effect_preset": "megaphone",
             "modulation_effect": "phaser",
             "ambience_preset": "cave",
@@ -162,6 +167,7 @@ class PreferencesVoiceTests(unittest.TestCase):
         self.assertTrue(prefs.voice_enabled)
         self.assertEqual(prefs.voice_preset, "monster")
         self.assertEqual(prefs.voice_pitch_semitones, 5.0)
+        self.assertTrue(prefs.voice_compatibility_mode)
         self.assertEqual(prefs.creative_effect_preset, "megaphone")
         self.assertEqual(prefs.modulation_effect, "phaser")
         self.assertEqual(prefs.ambience_preset, "cave")

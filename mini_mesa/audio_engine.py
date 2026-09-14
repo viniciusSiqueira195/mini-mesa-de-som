@@ -10,13 +10,19 @@ from pathlib import Path
 from queue import Empty, Full, Queue
 from typing import Protocol
 
-from .noise_reduction import RNNOISE_SAMPLE_RATE, RNNoiseReducer
+from .noise_reduction import (
+    RNNOISE_FRAME_SIZE,
+    RNNOISE_SAMPLE_RATE,
+    RNNoiseReducer,
+    StreamingNoiseReducer,
+)
 from .settings import (
     CreativeEffectSettings,
     ProAudioSettings,
     RecordingSettings,
     ReverbSettings,
     SoundboardSettings,
+    PlaybackEffectsSettings,
     SpatialSettings,
     VoiceSettings,
 )
@@ -163,10 +169,13 @@ class _StreamingPitchShifter:
         sample_rate: float,
         window_size: int = 4096,
         overlap: int = 1024,
+        max_pending_windows: int = 3,
         synchronous: bool = False,
     ) -> None:
         if overlap <= 0 or overlap >= window_size:
             raise ValueError("A sobreposição deve ser menor que a janela de pitch.")
+        if max_pending_windows <= 0:
+            raise ValueError("A fila de pitch deve aceitar ao menos uma janela.")
         self._np = numpy_module
         self._processor = processor
         self._sample_rate = sample_rate
@@ -183,7 +192,7 @@ class _StreamingPitchShifter:
         self._pending_tail = None
         self._output_lock = threading.Lock()
         self._error: Exception | None = None
-        self._jobs: Queue = Queue(maxsize=3)
+        self._jobs: Queue = Queue(maxsize=max_pending_windows)
         self._stopped = threading.Event()
         phase = numpy_module.linspace(
             0.0, numpy_module.pi / 2.0, overlap, endpoint=True
@@ -742,6 +751,7 @@ class AudioBackend(Protocol):
         *,
         monitor_voice: bool = True,
         process_pids: Sequence[int] = (),
+        playback_process_pids: Sequence[int] = (),
     ) -> AudioStream: ...
 
     def update_reverb(self, settings: ReverbSettings) -> None: ...
@@ -753,6 +763,7 @@ class AudioBackend(Protocol):
     def update_pro_audio(self, settings: ProAudioSettings) -> None: ...
 
     def update_soundboard(self, settings: SoundboardSettings) -> None: ...
+    def update_playback_effects(self, settings: PlaybackEffectsSettings) -> None: ...
 
     def update_processes(self, process_pids: Sequence[int]) -> None: ...
 
@@ -766,7 +777,7 @@ class AudioBackend(Protocol):
 
     def update_monitor(self, monitor_output: str | None) -> None: ...
 
-    def update_noise_reduction(self, enabled: bool) -> None: ...
+    def update_noise_reduction(self, enabled: bool, level_percent: int = 100) -> None: ...
 
     def update_spatial(self, settings: SpatialSettings) -> None: ...
 
@@ -846,13 +857,18 @@ class PedalboardBackend:
         self._creative_settings = CreativeEffectSettings()
         self._pro_audio_settings = ProAudioSettings()
         self._soundboard_settings = SoundboardSettings()
+        self._playback_effects_settings = PlaybackEffectsSettings()
+        self._playback_reverb_buffers: dict[int, object] = {}
+        self._playback_delay_buffer = None
         self._soundboard = SoundboardManager(int(self._sample_rate))
         self._limiter = None
         self._spatializer: HRTFSpatializer | None = None
         self._spatial_settings = SpatialSettings()
         self._active_stream: _MultiOutputSoundDeviceStream | None = None
         self._noise_reduction_enabled = False
+        self._noise_reduction_level = 1.0
         self._noise_reducer: RNNoiseReducer | None = None
+        self._noise_dry_delay: StreamingNoiseReducer | None = None
         self._processing_lock = threading.Lock()
         self._input_ids: dict[str, list[tuple[int, str]]] = {}
         self._output_ids: dict[str, list[tuple[int, str]]] = {}
@@ -947,6 +963,7 @@ class PedalboardBackend:
         *,
         monitor_voice: bool = True,
         process_pids: Sequence[int] = (),
+        playback_process_pids: Sequence[int] = (),
     ) -> AudioStream:
         try:
             (
@@ -1007,6 +1024,7 @@ class PedalboardBackend:
                 for block_size in block_sizes:
                     stream = None
                     process_source = None
+                    playback_process_source = None
                     try:
                         if process_pids:
                             process_source = ProcessAudioSource(
@@ -1017,6 +1035,13 @@ class PedalboardBackend:
                             # reader, so reserve 100 ms instead of only two
                             # callbacks before the real-time mixer begins.
                             process_source.set_prebuffer_frames(
+                                max(block_size * 4, round(sample_rate * 0.1))
+                            )
+                        if playback_process_pids:
+                            playback_process_source = ProcessAudioSource(
+                                self._np, tuple(playback_process_pids), sample_rate
+                            )
+                            playback_process_source.set_prebuffer_frames(
                                 max(block_size * 4, round(sample_rate * 0.1))
                             )
 
@@ -1033,6 +1058,8 @@ class PedalboardBackend:
                             monitor_voice=monitor_voice,
                             process_source=process_source,
                             process_gain=lambda: self._process_volume,
+                            playback_process_source=playback_process_source,
+                            playback_processor=self.process_local_playback_audio,
                         )
                         # Construction alone does not prove that a Windows host
                         # API can start the endpoint. Validate every route so an
@@ -1044,6 +1071,8 @@ class PedalboardBackend:
                             stream.close()
                         elif process_source is not None:
                             process_source.close()
+                        if playback_process_source is not None:
+                            playback_process_source.close()
                         last_error = exc
                         continue
 
@@ -1190,9 +1219,26 @@ class PedalboardBackend:
                             soundboard_settings.ducking_percent / 100.0
                         ) * activity
             if soundboard_audio is not None:
-                self._effects_monitor_audio = soundboard_audio * soundboard_duck
+                self._effects_monitor_audio = self._apply_playback_effects(
+                    soundboard_audio * soundboard_duck
+                )
             if self._noise_reducer is not None:
-                mono_input = self._noise_reducer.process(mono_input)
+                clean_input = self._noise_reducer.process(mono_input)
+                level = getattr(self, "_noise_reduction_level", 1.0)
+                dry_delay = getattr(self, "_noise_dry_delay", None)
+                if dry_delay is None:
+                    dry_delay = StreamingNoiseReducer(
+                        lambda frame: frame.copy(),
+                        # RNNoise itself emits the previous 10 ms frame and
+                        # StreamingNoiseReducer adds one alignment frame.
+                        initial_delay_frames=RNNOISE_FRAME_SIZE * 2,
+                    )
+                    self._noise_dry_delay = dry_delay
+                dry_input = dry_delay.process(mono_input)
+                if level < 1.0:
+                    mono_input = dry_input * (1.0 - level) + clean_input * level
+                else:
+                    mono_input = clean_input
             pitch_shifter = getattr(self, "_pitch_shifter", None)
             if pitch_shifter is not None:
                 mono_input = pitch_shifter.process(mono_input)
@@ -1274,6 +1320,46 @@ class PedalboardBackend:
             if self._soundboard is not None:
                 self._soundboard.set_volume_percent(settings.volume_percent)
 
+    def update_playback_effects(self, settings: PlaybackEffectsSettings) -> None:
+        with self._processing_lock:
+            if settings != self._playback_effects_settings:
+                self._playback_reverb_buffers = {}
+                self._playback_delay_buffer = None
+            self._playback_effects_settings = settings
+
+    def _apply_playback_effects(self, audio):
+        """Return a local-only processed copy for the effects monitor."""
+        settings = getattr(self, "_playback_effects_settings", None)
+        if settings is None:
+            settings = PlaybackEffectsSettings()
+        result = audio.copy() * (settings.volume_percent / 100.0)
+        mid = (result[:, 0] + result[:, 1]) * 0.5
+        side = (result[:, 0] - result[:, 1]) * 0.5 * (settings.stereo_width_percent / 100.0)
+        result[:, 0], result[:, 1] = mid + side, mid - side
+        # The real-time callback normally receives 256-512 frames, shorter than
+        # the first echo.  Keep each tap's history between callbacks so effects
+        # remain audible instead of being discarded at every block boundary.
+        source = result.copy()
+        if settings.reverb_enabled:
+            buffers = getattr(self, "_playback_reverb_buffers", {})
+            for delay, gain in ((1200, .18), (2400, .12), (3600, .08)):
+                history = buffers.get(delay)
+                if history is None or history.shape != (delay, source.shape[1]):
+                    history = self._np.zeros((delay, source.shape[1]), dtype=source.dtype)
+                merged = self._np.concatenate((history, source), axis=0)
+                result += merged[:source.shape[0]] * gain
+                buffers[delay] = merged[-delay:].copy()
+            self._playback_reverb_buffers = buffers
+        if settings.delay_enabled:
+            delay = 2400
+            history = getattr(self, "_playback_delay_buffer", None)
+            if history is None or history.shape != (delay, source.shape[1]):
+                history = self._np.zeros((delay, source.shape[1]), dtype=source.dtype)
+            merged = self._np.concatenate((history, source), axis=0)
+            result += merged[:source.shape[0]] * .35
+            self._playback_delay_buffer = merged[-delay:].copy()
+        return self._np.clip(result, -1.0, 1.0)
+
     def update_processes(self, process_pids: Sequence[int]) -> None:
         """Replace process-loopback capture without reopening the audio route."""
 
@@ -1296,6 +1382,10 @@ class PedalboardBackend:
             if source is not None:
                 source.close()
             raise
+
+    def process_local_playback_audio(self, audio):
+        with self._processing_lock:
+            return self._apply_playback_effects(audio)
 
     def set_volumes(self, microphone: float, processes: float) -> None:
         with self._processing_lock:
@@ -1690,14 +1780,29 @@ class PedalboardBackend:
             processor = _MixedPitchProcessor(self._np, pitched, 0.20, 0.80)
         else:
             processor = pitched
+        if self._voice_settings.compatibility_mode:
+            # A longer analysis window and eight queued windows add latency,
+            # but give slower machines substantially more time to render pitch
+            # bursts before the real-time callback needs to drop a window.
+            window_size, overlap, max_pending_windows = 6144, 1536, 8
+        else:
+            window_size, overlap, max_pending_windows = 4096, 1024, 3
         self._pitch_shifter = _StreamingPitchShifter(
-            self._np, processor, self._sample_rate
+            self._np,
+            processor,
+            self._sample_rate,
+            window_size=window_size,
+            overlap=overlap,
+            max_pending_windows=max_pending_windows,
         )
 
-    def update_noise_reduction(self, enabled: bool) -> None:
+    def update_noise_reduction(self, enabled: bool, level_percent: int = 100) -> None:
         if not isinstance(enabled, bool):
             raise TypeError("Estado da redução de ruído deve ser verdadeiro ou falso.")
+        if isinstance(level_percent, bool) or not isinstance(level_percent, int) or not 0 <= level_percent <= 100:
+            raise ValueError("Nível da redução de ruído deve estar entre 0 e 100.")
         self._noise_reduction_enabled = enabled
+        self._noise_reduction_level = level_percent / 100.0
 
     def update_spatial(self, settings: SpatialSettings) -> None:
         with self._processing_lock:
@@ -1718,6 +1823,16 @@ class PedalboardBackend:
         previous = self._noise_reducer
         self._noise_reducer = (
             RNNoiseReducer() if self._noise_reduction_enabled else None
+        )
+        self._noise_dry_delay = (
+            StreamingNoiseReducer(
+                lambda frame: frame.copy(),
+                # Match RNNoise's native one-frame lookbehind plus the
+                # streaming adapter's frame, so dry/wet mixing stays in phase.
+                initial_delay_frames=RNNOISE_FRAME_SIZE * 2,
+            )
+            if self._noise_reducer is not None
+            else None
         )
         if previous is not None:
             previous.close()
@@ -1951,12 +2066,16 @@ class _MultiOutputSoundDeviceStream:
         monitor_voice: bool = True,
         process_source=None,
         process_gain: Callable[[], float] | None = None,
+        playback_process_source=None,
+        playback_processor: Callable | None = None,
     ) -> None:
         self._sd = sounddevice
         self._processor = processor
         self._effects_processor = effects_processor
         self._monitor_voice = monitor_voice
         self._process_source = process_source
+        self._playback_process_source = playback_process_source
+        self._playback_processor = playback_processor
         self._process_source_lock = threading.Lock()
         self._process_gain = process_gain or (lambda: 1.0)
         self._sample_rate = sample_rate
@@ -2081,10 +2200,14 @@ class _MultiOutputSoundDeviceStream:
         try:
             voice_processed = self._processor(indata, frames)
             proc_audio = None
+            playback_audio = None
             with self._process_source_lock:
                 source = self._process_source
                 if source is not None:
                     proc_audio = source.take(frames) * self._process_gain()
+                playback_source = self._playback_process_source
+                if playback_source is not None:
+                    playback_audio = playback_source.take(frames)
             if proc_audio is not None:
                 processed = (voice_processed + proc_audio).clip(-1.0, 1.0)
             else:
@@ -2114,6 +2237,10 @@ class _MultiOutputSoundDeviceStream:
             monitor_audio = processed
             if not self._monitor_voice and self._effects_processor is not None:
                 monitor_audio = self._effects_processor()
+            if playback_audio is not None:
+                if self._playback_processor is not None:
+                    playback_audio = self._playback_processor(playback_audio)
+                monitor_audio = (monitor_audio + playback_audio).clip(-1.0, 1.0)
             for monitor in (self._monitor_output, self._pending_monitor):
                 if monitor is not None:
                     monitor.push(monitor_audio)
@@ -2207,11 +2334,15 @@ class _MultiOutputSoundDeviceStream:
                         stream.close()
                 except Exception:
                     pass
-            with self._process_source_lock:
-                process_source = self._process_source
-                self._process_source = None
-            if process_source is not None:
-                process_source.close()
+        with self._process_source_lock:
+            process_source = self._process_source
+            self._process_source = None
+            playback_process_source = self._playback_process_source
+            self._playback_process_source = None
+        if process_source is not None:
+            process_source.close()
+        if playback_process_source is not None:
+            playback_process_source.close()
 
     def _abort_streams(self) -> None:
         with self._outputs_lock:
@@ -2241,6 +2372,8 @@ class AudioEngine:
         self._creative_settings = CreativeEffectSettings()
         self._pro_audio_settings = ProAudioSettings()
         self._soundboard_settings = SoundboardSettings()
+        self._playback_effects_settings = PlaybackEffectsSettings()
+        self._playback_process_pids: tuple[int, ...] = ()
         self._recording_settings = RecordingSettings()
         self._recorder: AudioRecorder | None = None
         self._stream: AudioStream | None = None
@@ -2325,6 +2458,19 @@ class AudioEngine:
             self._soundboard_settings = settings
             self._backend.update_soundboard(settings)
 
+    def update_playback_effects(self, settings: PlaybackEffectsSettings) -> None:
+        with self._lock:
+            self._playback_effects_settings = settings
+            if self._stream is not None:
+                self._backend.update_playback_effects(settings)
+
+    def update_playback_processes(self, process_pids: Sequence[int]) -> None:
+        pids = tuple(sorted({int(pid) for pid in process_pids if int(pid) > 0}))
+        with self._lock:
+            if self._stream is not None:
+                raise RuntimeError("Altere os aplicativos de reprodução com a mesa desativada.")
+            self._playback_process_pids = pids
+
     def update_transmitted_processes(self, process_pids: Sequence[int]) -> None:
         pids = tuple(sorted({int(pid) for pid in process_pids if int(pid) > 0}))
         with self._lock:
@@ -2382,6 +2528,7 @@ class AudioEngine:
         *,
         effects_output: str | None = None,
         process_pids: Sequence[int] = (),
+        playback_process_pids: Sequence[int] = (),
     ) -> None:
         input_device = input_device.strip()
         output_device = output_device.strip()
@@ -2389,6 +2536,9 @@ class AudioEngine:
         effects_output = effects_output.strip() if effects_output else None
         process_pids = tuple(
             sorted({int(pid) for pid in process_pids if int(pid) > 0})
+        )
+        playback_process_pids = tuple(
+            sorted({int(pid) for pid in playback_process_pids if int(pid) > 0})
         )
         local_output = monitor_output or effects_output
         if not input_device:
@@ -2416,6 +2566,7 @@ class AudioEngine:
             self._backend.update_creative_effects(self._creative_settings)
             self._backend.update_pro_audio(self._pro_audio_settings)
             self._backend.update_soundboard(self._soundboard_settings)
+            self._backend.update_playback_effects(self._playback_effects_settings)
             try:
                 kwargs = (
                     {"monitor_voice": monitor_output is not None}
@@ -2423,6 +2574,8 @@ class AudioEngine:
                 )
                 if process_pids:
                     kwargs["process_pids"] = process_pids
+                if playback_process_pids:
+                    kwargs["playback_process_pids"] = playback_process_pids
                 stream = self._backend.create_stream(
                     input_device,
                     output_device,
@@ -2438,6 +2591,7 @@ class AudioEngine:
             if effects_output is not None:
                 stream.set_monitor_voice(monitor_output is not None)
             self._effects_output = effects_output
+            self._playback_process_pids = playback_process_pids
             self._stream = stream
             if self._recorder is not None and self._recorder.is_recording:
                 setter = getattr(stream, "set_recorder", None)
@@ -2483,15 +2637,26 @@ class AudioEngine:
             self._monitor_output = monitor_output
             self._effects_output = effects_output
 
-    def update_noise_reduction(self, enabled: bool) -> None:
+    def update_noise_reduction(self, enabled: bool, level_percent: int = 100) -> None:
         if not isinstance(enabled, bool):
             raise TypeError("Estado da redução de ruído deve ser verdadeiro ou falso.")
+        if (
+            isinstance(level_percent, bool)
+            or not isinstance(level_percent, int)
+            or not 0 <= level_percent <= 100
+        ):
+            raise ValueError("Nível da redução de ruído deve estar entre 0 e 100.")
         with self._lock:
-            if self._stream is not None:
+            if self._stream is not None and enabled != self._noise_reduction_enabled:
                 raise RuntimeError(
                     "Desative a mesa antes de alterar a redução de ruído."
                 )
-            self._backend.update_noise_reduction(enabled)
+            if level_percent == 100:
+                # Keep third-party backends written for the original boolean API
+                # working at the default, fully-cleaned level.
+                self._backend.update_noise_reduction(enabled)
+            else:
+                self._backend.update_noise_reduction(enabled, level_percent)
             self._noise_reduction_enabled = enabled
 
     def update_spatial(self, settings: SpatialSettings) -> None:

@@ -376,7 +376,12 @@ Configurar atalhos globais**, eles podem funcionar também quando Discord,
 TeamTalk, um gravador ou outro programa estiver em foco. A ativação é opcional
 para não capturar teclas usadas por outros aplicativos sem escolha do usuário.
 
-O diálogo permite escolher os modificadores de efeitos e páginas. Se qualquer
+O diálogo permite escolher os modificadores de efeitos e páginas, além de um
+atalho próprio para mostrar a Mini Mesa sobre os outros programas ou minimizá-la
+novamente. Esse atalho pode usar Ctrl, Ctrl+Shift, Ctrl+Alt, Alt ou Alt+Shift e
+uma tecla de A a Z ou de 0 a 9. A mesma tela também oferece **Iniciar a Mini Mesa
+com o Windows**, desligado por padrão e registrado somente para o usuário atual;
+ele abre o programa, mas não inicia a transmissão de áudio. Se qualquer
 combinação já estiver registrada por outro programa, a Mini Mesa informa qual
 falhou, desativa o conjunto e libera os atalhos que conseguiu registrar.
 

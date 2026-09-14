@@ -25,12 +25,18 @@ class StreamingNoiseReducer:
         process_frame: Callable[[np.ndarray], np.ndarray],
         *,
         frame_size: int = RNNOISE_FRAME_SIZE,
+        initial_delay_frames: int | None = None,
     ) -> None:
+        if frame_size <= 0:
+            raise ValueError("O tamanho do quadro deve ser positivo.")
+        if initial_delay_frames is None:
+            initial_delay_frames = frame_size
+        if initial_delay_frames < 0:
+            raise ValueError("O atraso inicial não pode ser negativo.")
         self._process_frame = process_frame
         self._frame_size = frame_size
         self._input = np.empty(0, dtype=np.float32)
-        # One delayed frame keeps every callback full while block sizes differ.
-        self._output = np.zeros(frame_size, dtype=np.float32)
+        self._output = np.zeros(initial_delay_frames, dtype=np.float32)
 
     def process(self, samples: np.ndarray) -> np.ndarray:
         samples = np.asarray(samples, dtype=np.float32)

@@ -21,7 +21,8 @@ from pathlib import Path
 _EXCLUDED = frozenset({
     "audiodg.exe", "csrss.exe", "dwm.exe", "explorer.exe", "lsass.exe",
     "mini_mesa.exe", "minimesadesom.exe", "placasom.exe", "services.exe",
-    "smss.exe", "svchost.exe", "system.exe", "wininit.exe", "winlogon.exe",
+    "smss.exe", "svchost.exe", "system.exe", "teamtalk.exe", "teamtalk5.exe",
+    "teamtalkclassic.exe", "teamtalk5classic.exe", "wininit.exe", "winlogon.exe",
 })
 
 
