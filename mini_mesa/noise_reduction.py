@@ -11,6 +11,11 @@ import numpy as np
 
 RNNOISE_SAMPLE_RATE = 48_000
 RNNOISE_FRAME_SIZE = 480
+# Measured end-to-end latency of RNNoiseReducer: one alignment frame from
+# StreamingNoiseReducer plus two frames inside the native library.  The dry
+# signal must be delayed by exactly this much before dry/wet mixing, otherwise
+# the mix is heard as an echo (a doubled voice).
+RNNOISE_DRY_ALIGNMENT_SAMPLES = RNNOISE_FRAME_SIZE * 3
 
 
 class NoiseReductionDependencyError(RuntimeError):

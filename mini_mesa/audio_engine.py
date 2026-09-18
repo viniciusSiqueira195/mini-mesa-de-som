@@ -11,7 +11,7 @@ from queue import Empty, Full, Queue
 from typing import Protocol
 
 from .noise_reduction import (
-    RNNOISE_FRAME_SIZE,
+    RNNOISE_DRY_ALIGNMENT_SAMPLES,
     RNNOISE_SAMPLE_RATE,
     RNNoiseReducer,
     StreamingNoiseReducer,
@@ -1229,9 +1229,7 @@ class PedalboardBackend:
                 if dry_delay is None:
                     dry_delay = StreamingNoiseReducer(
                         lambda frame: frame.copy(),
-                        # RNNoise itself emits the previous 10 ms frame and
-                        # StreamingNoiseReducer adds one alignment frame.
-                        initial_delay_frames=RNNOISE_FRAME_SIZE * 2,
+                        initial_delay_frames=RNNOISE_DRY_ALIGNMENT_SAMPLES,
                     )
                     self._noise_dry_delay = dry_delay
                 dry_input = dry_delay.process(mono_input)
@@ -1827,9 +1825,7 @@ class PedalboardBackend:
         self._noise_dry_delay = (
             StreamingNoiseReducer(
                 lambda frame: frame.copy(),
-                # Match RNNoise's native one-frame lookbehind plus the
-                # streaming adapter's frame, so dry/wet mixing stays in phase.
-                initial_delay_frames=RNNOISE_FRAME_SIZE * 2,
+                initial_delay_frames=RNNOISE_DRY_ALIGNMENT_SAMPLES,
             )
             if self._noise_reducer is not None
             else None
