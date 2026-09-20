@@ -1,5 +1,18 @@
 # Histórico de versões
 
+## 1.2.6 — 2026-09-20
+
+Esta atualização corrige a duplicação e o eco da voz ao ajustar a intensidade
+da redução de ruído para valores abaixo de 100%.
+
+### Redução de ruído
+
+- O sinal original agora recebe o mesmo atraso real do áudio tratado pelo
+  RNNoise antes da mistura, mantendo as duas rotas sincronizadas.
+- A mistura parcial da redução de ruído deixa de produzir voz duplicada ou eco.
+- Um novo teste mede o atraso do RNNoise nativo para evitar que o problema volte
+  em futuras alterações do processamento de áudio.
+
 ## 1.2.5 — 2026-09-14
 
 Esta versão melhora a continuidade do áudio e dá mais controle sobre a limpeza

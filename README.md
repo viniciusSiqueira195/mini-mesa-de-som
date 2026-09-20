@@ -11,14 +11,13 @@ um cabo de áudio virtual usado pelo Discord, TeamTalk, WhatsApp ou outro progra
 
 ## Versão atual
 
-A versão **1.2.5** melhora a continuidade do áudio, adiciona intensidade
-ajustável à redução de ruído e um modo de compatibilidade para o modificador de
-voz. Também inclui atalho global para mostrar ou minimizar a janela, opção de
-iniciar com o Windows e impede que duas instâncias sejam abertas ao mesmo tempo.
+A versão **1.2.6** corrige a duplicação e o eco da voz ao usar a redução de
+ruído abaixo de 100%. O sinal original agora acompanha exatamente o atraso do
+RNNoise antes da mistura, preservando uma voz limpa e natural em qualquer nível.
 
 ## Instalação rápida
 
-Baixe `MiniMesaDeSom-Setup-1.2.5.exe` na página da
+Baixe `MiniMesaDeSom-Setup-1.2.6.exe` na página da
 [versão mais recente](https://github.com/viniciusSiqueira195/mini-mesa-de-som/releases/latest)
 e execute o instalador. Ele pode instalar opcionalmente o VB-CABLE oficial,
 necessário para enviar o áudio processado ao TeamTalk, Discord ou outro programa.
@@ -162,7 +161,7 @@ Depois execute:
 O script roda os testes, empacota o programa com PyInstaller, executa um autoteste
 do executável sem o Python de desenvolvimento no PATH e baixa os pacotes
 oficiais do VB-CABLE e AudioDeviceCmdlets com verificação SHA-256 e gera
-`installer-output\MiniMesaDeSom-Setup-1.2.5.exe`. O aplicativo é empacotado em
+`installer-output\MiniMesaDeSom-Setup-1.2.6.exe`. O aplicativo é empacotado em
 uma pasta interna para dar mais estabilidade às bibliotecas nativas de áudio;
 para o usuário, a entrega continua sendo um único instalador.
 
