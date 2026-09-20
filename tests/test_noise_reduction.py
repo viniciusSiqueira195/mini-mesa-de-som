@@ -5,7 +5,12 @@ import unittest
 
 import numpy as np
 
-from mini_mesa.noise_reduction import RNNoiseReducer, StreamingNoiseReducer
+from mini_mesa.noise_reduction import (
+    RNNOISE_DRY_ALIGNMENT_SAMPLES,
+    NoiseReductionDependencyError,
+    RNNoiseReducer,
+    StreamingNoiseReducer,
+)
 
 
 class StreamingNoiseReducerTests(unittest.TestCase):
@@ -56,6 +61,29 @@ class StreamingNoiseReducerTests(unittest.TestCase):
 
         np.testing.assert_array_equal(mixed[:8], np.zeros(8, dtype=np.float32))
         np.testing.assert_allclose(mixed[8:], source[:-8] * 0.75)
+
+
+class RNNoiseDryAlignmentTests(unittest.TestCase):
+    def test_dry_delay_matches_the_real_engine_latency(self) -> None:
+        try:
+            reducer = RNNoiseReducer()
+        except NoiseReductionDependencyError:
+            self.skipTest("RNNoise nativo indisponível")
+        rate = 48_000
+        t = np.arange(rate * 2) / rate
+        phase = np.cumsum(120 + 20 * np.sin(2 * np.pi * 3 * t)) / rate
+        source = sum(np.sin(2 * np.pi * k * phase) / k for k in range(1, 25))
+        source = (source / np.abs(source).max() * 0.5).astype(np.float32)
+        clean = np.concatenate(
+            [reducer.process(source[i : i + 256]) for i in range(0, source.size - 255, 256)]
+        )
+        start = rate // 2
+        lags = range(RNNOISE_DRY_ALIGNMENT_SAMPLES - 200, RNNOISE_DRY_ALIGNMENT_SAMPLES + 200)
+        best = max(
+            lags,
+            key=lambda lag: float(np.dot(source[start - lag : clean.size - lag], clean[start:])),
+        )
+        self.assertLessEqual(abs(best - RNNOISE_DRY_ALIGNMENT_SAMPLES), 4)
 
 
 class RNNoiseLifecycleTests(unittest.TestCase):
