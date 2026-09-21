@@ -1,5 +1,24 @@
 # Histórico de versões
 
+## 1.2.7 — 2026-09-21
+
+Esta atualização deixa a lista de programas mais simples de usar, especialmente
+com navegadores e outros aplicativos que abrem vários processos.
+
+### Programas agrupados na transmissão
+
+- Cada nome de executável aparece uma única vez na lista. Por exemplo, vários
+  processos de chrome.exe ficam reunidos em um só item, sem repetir linhas com PIDs.
+- Marcar um programa seleciona todos os seus processos encontrados; desmarcá-lo
+  retira o grupo da transmissão. Os identificadores continuam sendo usados
+  internamente para capturar o áudio, sem poluir a interface.
+- A lista mantém os estados marcado e desmarcado para facilitar a leitura com NVDA.
+- Ao usar Atualizar programas, a seleção acompanha o nome do aplicativo mesmo
+  que seus processos tenham mudado. Se a mesa estiver ativa, a captura é atualizada
+  sem precisar desativá-la e reativá-la.
+- As seleções antigas por PID são reconhecidas ao abrir a mesa: quando um processo
+  salvo ainda está presente, seu grupo aparece marcado.
+
 ## 1.2.6 — 2026-09-20
 
 Esta atualização corrige a duplicação e o eco da voz ao ajustar a intensidade

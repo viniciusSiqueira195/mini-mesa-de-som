@@ -22,7 +22,7 @@ def test_process_inventory_runs_without_a_visible_console() -> None:
     with patch("mini_mesa.process_audio.subprocess.run", return_value=completed) as run:
         processes = list_candidate_processes()
 
-    assert processes[0].pid == 123
+    assert processes[0].pids == (123,)
     assert processes[0].name == "player.exe"
     assert run.call_args.kwargs["creationflags"] == subprocess.CREATE_NO_WINDOW
     startupinfo = run.call_args.kwargs["startupinfo"]

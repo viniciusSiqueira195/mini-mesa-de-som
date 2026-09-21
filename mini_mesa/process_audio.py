@@ -42,12 +42,12 @@ def _hidden_subprocess_options() -> dict[str, object]:
 
 @dataclass(frozen=True, slots=True)
 class ProcessItem:
-    pid: int
+    pids: tuple[int, ...]
     name: str
 
     @property
     def label(self) -> str:
-        return f"{self.name} (PID {self.pid})"
+        return self.name
 
 
 def list_candidate_processes() -> tuple[ProcessItem, ...]:
@@ -62,7 +62,7 @@ def list_candidate_processes() -> tuple[ProcessItem, ...]:
         )
     except (OSError, subprocess.SubprocessError):
         return ()
-    items: list[ProcessItem] = []
+    groups: dict[str, set[int]] = {}
     for row in csv.reader(io.StringIO(completed.stdout)):
         if len(row) < 2 or row[0].casefold() in _EXCLUDED:
             continue
@@ -71,8 +71,11 @@ def list_candidate_processes() -> tuple[ProcessItem, ...]:
         except ValueError:
             continue
         if pid > 0:
-            items.append(ProcessItem(pid, row[0]))
-    return tuple(sorted(items, key=lambda item: (item.name.casefold(), item.pid)))
+            groups.setdefault(row[0].casefold(), set()).add(pid)
+    return tuple(
+        ProcessItem(tuple(sorted(pids)), name)
+        for name, pids in sorted(groups.items())
+    )
 
 
 def _helper_path() -> Path | None:

@@ -1464,7 +1464,8 @@ class MainFrame(wx.Frame):
         process_help = wx.StaticText(
             process_panel,
             label=("Marque os programas cujo áudio será misturado ao microfone. "
-                   "A alteração é aplicada na próxima ativação da mesa."),
+                   "Cada programa reúne seus processos em um único item. "
+                   "As alterações são aplicadas mesmo com a mesa ativa."),
         )
         process_help.Wrap(540)
         self.process_list = wx.CheckListBox(process_panel)
@@ -2768,25 +2769,43 @@ class MainFrame(wx.Frame):
         event.Skip()
 
     def _refresh_processes(self) -> None:
-        selected = (
-            set(self._selected_process_pids())
-            or set(self.preferences.transmitted_processes)
-        )
+        previous_pids = self._selected_process_pids()
+        previous_items = self._process_items
+        selected_names = {
+            previous_items[index].name.casefold()
+            for index in self.process_list.GetCheckedItems()
+            if 0 <= index < len(previous_items)
+        }
+        # Older preferences stored individual PIDs. A selected member now
+        # selects its entire application group on the initial inventory.
+        saved_pids = set(self.preferences.transmitted_processes)
         self._process_items = list_candidate_processes()
-        labels = [
-            self._format_process_item_label(item, item.pid in selected)
+        checked = [
+            item.name.casefold() in selected_names if previous_items
+            else bool(saved_pids.intersection(item.pids))
             for item in self._process_items
         ]
+        labels = [
+            self._format_process_item_label(item, is_checked)
+            for item, is_checked in zip(self._process_items, checked)
+        ]
         self.process_list.Set(labels)
-        for index, item in enumerate(self._process_items):
-            self.process_list.Check(index, item.pid in selected)
+        for index, is_checked in enumerate(checked):
+            self.process_list.Check(index, is_checked)
+        current_pids = self._selected_process_pids()
+        if self.engine.is_running and current_pids != previous_pids:
+            try:
+                self.engine.update_transmitted_processes(current_pids)
+            except Exception as exc:
+                self.SetStatusText(f"Não foi possível atualizar a transmissão dos programas: {exc}")
 
     def _selected_process_pids(self) -> tuple[int, ...]:
-        return tuple(
-            self._process_items[index].pid
+        return tuple(sorted({
+            pid
             for index in self.process_list.GetCheckedItems()
             if 0 <= index < len(self._process_items)
-        )
+            for pid in self._process_items[index].pids
+        }))
 
     def _refresh_devices(self) -> None:
         selected_input = (
