@@ -819,7 +819,7 @@ class PedalboardBackend:
         except ImportError as exc:
             raise AudioDependencyError(
                 "O motor de áudio não está instalado. "
-                "Execute: python -m pip install -e ."
+                "Execute: uv sync"
             ) from exc
 
         self._np = np

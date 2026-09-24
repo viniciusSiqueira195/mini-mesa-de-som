@@ -110,7 +110,7 @@ class RNNoiseReducer:
         except PackageNotFoundError as exc:
             raise NoiseReductionDependencyError(
                 "A redução de ruído opcional não está instalada. "
-                "Execute: python -m pip install -e ."
+                "Execute: uv sync"
             ) from exc
         library_path = Path(package.locate_file("pyrnnoise/rnnoise.dll"))
         if not library_path.is_file():
