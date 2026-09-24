@@ -2478,14 +2478,18 @@ class AudioEngine:
             updater(pids)
 
     def set_volumes(self, microphone: float, processes: float) -> None:
-        values = (microphone, processes)
-        if any(
-            isinstance(value, bool)
-            or not isinstance(value, (int, float))
-            or not 0.0 <= float(value) <= 2.0
-            for value in values
+        if (
+            isinstance(microphone, bool)
+            or not isinstance(microphone, (int, float))
+            or not 0.0 <= float(microphone) <= 4.0
         ):
-            raise ValueError("O volume deve estar entre 0 e 200 por cento.")
+            raise ValueError("O volume do microfone deve estar entre 0 e 100 por cento.")
+        if (
+            isinstance(processes, bool)
+            or not isinstance(processes, (int, float))
+            or not 0.0 <= float(processes) <= 2.0
+        ):
+            raise ValueError("O volume dos programas deve estar entre 0 e 200 por cento.")
         with self._lock:
             setter = getattr(self._backend, "set_volumes", None)
             if setter is not None:

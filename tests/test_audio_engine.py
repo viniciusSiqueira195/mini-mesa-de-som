@@ -93,6 +93,7 @@ class FakeBackend:
         self.created_process_pids: tuple[int, ...] = ()
         self.created_playback_process_pids: tuple[int, ...] = ()
         self.updated_process_pids: list[tuple[int, ...]] = []
+        self.volumes: list[tuple[float, float]] = []
 
     def input_devices(self) -> tuple[str, ...]:
         return ("FIFINE AM8", "Zeus X")
@@ -137,6 +138,9 @@ class FakeBackend:
 
     def update_processes(self, process_pids) -> None:
         self.updated_process_pids.append(tuple(process_pids))
+
+    def set_volumes(self, microphone: float, processes: float) -> None:
+        self.volumes.append((microphone, processes))
 
     def play_sound(self, sound_id_or_path: str) -> bool:
         self.played_sounds.append(sound_id_or_path)
@@ -1278,6 +1282,16 @@ class PedalboardProcessingTests(unittest.TestCase):
 
 
 class AudioEngineTests(unittest.TestCase):
+    def test_microphone_volume_accepts_four_times_gain(self) -> None:
+        backend = FakeBackend()
+        engine = AudioEngine(backend)
+
+        engine.set_volumes(4.0, 2.0)
+
+        self.assertEqual(backend.volumes, [(4.0, 2.0)])
+        with self.assertRaisesRegex(ValueError, "programas.*200"):
+            engine.set_volumes(1.0, 2.1)
+
     def test_soundboard_only_plays_while_the_route_is_active(self) -> None:
         backend = FakeBackend()
         engine = AudioEngine(backend)

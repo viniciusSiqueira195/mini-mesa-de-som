@@ -106,6 +106,14 @@ class PreferencesStoreTests(unittest.TestCase):
         self.assertTrue(preferences.spatial_automatic)
         self.assertEqual(preferences.spatial_speed, 35)
 
+    def test_microphone_volume_is_limited_to_one_hundred_percent(self) -> None:
+        preferences = AppPreferences.from_dict(
+            {"microphone_volume_percent": 200, "process_volume_percent": 200}
+        )
+
+        self.assertEqual(preferences.microphone_volume_percent, 100)
+        self.assertEqual(preferences.process_volume_percent, 200)
+
     def test_horizontal_angle_from_schema_four_migrates_to_xyz(self) -> None:
         preferences = AppPreferences.from_dict(
             {"spatial_enabled": True, "spatial_angle": -90}

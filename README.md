@@ -40,7 +40,7 @@ entradas reconhecidas pelo Windows podem ser selecionadas diretamente.
 - Interface nativa acessível com NVDA e operação completa pelo teclado.
 - Seleção independente do microfone, cabo virtual e dispositivo de retorno.
 - Seleção de um ou mais programas para transmitir junto com o microfone.
-- Volumes independentes, de 0% a 200%, para o microfone e os programas.
+- Volume do microfone de 0% a 100%, com ganho de até 4x, e volume dos programas de 0% a 200%.
 - Reverb ajustado por um único controle simples de 0 a 100.
 - Modificador de voz com presets de pitch e harmonização.
 - Efeitos criativos, modulações, ambientes e controles de intensidade com

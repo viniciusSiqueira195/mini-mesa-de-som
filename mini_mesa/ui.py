@@ -1490,7 +1490,7 @@ class MainFrame(wx.Frame):
         volume_panel = volumes.GetStaticBox()
         self.microphone_volume = wx.Slider(
             volume_panel, value=self.preferences.microphone_volume_percent,
-            minValue=0, maxValue=200, style=wx.SL_HORIZONTAL | wx.SL_LABELS,
+            minValue=0, maxValue=100, style=wx.SL_HORIZONTAL | wx.SL_LABELS,
         )
         self.process_volume = wx.Slider(
             volume_panel, value=self.preferences.process_volume_percent,
@@ -2764,7 +2764,7 @@ class MainFrame(wx.Frame):
     def _on_native_volume_changed(self, event: wx.Event) -> None:
         setter = getattr(self.engine, "set_volumes", None)
         if setter is not None:
-            setter(self.microphone_volume.GetValue() / 100.0, self.process_volume.GetValue() / 100.0)
+            setter(self.microphone_volume.GetValue() / 25.0, self.process_volume.GetValue() / 100.0)
         self._save_preferences()
         event.Skip()
 
@@ -3374,7 +3374,7 @@ class MainFrame(wx.Frame):
     def _start_selected_route(self) -> None:
         setter = getattr(self.engine, "set_volumes", None)
         if setter is not None:
-            setter(self.microphone_volume.GetValue() / 100.0, self.process_volume.GetValue() / 100.0)
+            setter(self.microphone_volume.GetValue() / 25.0, self.process_volume.GetValue() / 100.0)
         self.engine.update_noise_reduction(
             self.noise_reduction_checkbox.GetValue(),
             self.noise_reduction_level.GetValue(),
