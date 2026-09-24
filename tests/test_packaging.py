@@ -36,7 +36,10 @@ class PackagingTests(unittest.TestCase):
                           user_features=True, codecs=["wav", "mp3", "flac", "ogg"])
 
             def run(command, **kwargs):
-                self.assertEqual(command, [str(executable), "--self-test", str(result_path)])
+                self.assertEqual(
+                    command,
+                    [str(executable.resolve(strict=True)), "--self-test", str(result_path.resolve())],
+                )
                 self.assertNotEqual(Path(kwargs["cwd"]), executable.parent)
                 self.assertNotIn("PYTHONPATH", kwargs["env"])
                 self.assertNotIn("VIRTUAL_ENV", kwargs["env"])
