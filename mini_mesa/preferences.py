@@ -262,12 +262,20 @@ class AppPreferences:
                 return default
             return value
 
-        def volume_value(name: str) -> int:
-            value = data.get(name, 100)
-            return value if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 200 else 100
+        def microphone_volume_value() -> int:
+            value = data.get("microphone_volume_percent", 100)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                return 100
+            return min(value, 100)
 
-        microphone_volume = volume_value("microphone_volume_percent")
-        process_volume = volume_value("process_volume_percent")
+        def process_volume_value() -> int:
+            value = data.get("process_volume_percent", 100)
+            if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 200:
+                return 100
+            return value
+
+        microphone_volume = microphone_volume_value()
+        process_volume = process_volume_value()
 
         style_intensity = percent_value(
             "style_intensity_percent", defaults.style_intensity_percent

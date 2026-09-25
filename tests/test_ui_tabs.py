@@ -237,6 +237,7 @@ class NotebookTests(unittest.TestCase):
         self.frame.monitor_choice.SetSelection(0)
         self.frame.monitor_checkbox.SetValue(False)
         self.frame._start_selected_route()
+        self.engine.set_volumes.assert_called_once_with(4.0, 1.0)
         self.engine.start.assert_called_once_with(
             "Microfone", "Cabo virtual", None, effects_output="Fones"
         )

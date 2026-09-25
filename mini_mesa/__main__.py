@@ -15,7 +15,7 @@ def main() -> int:
     except ImportError as exc:
         print(
             "Não foi possível carregar a interface. "
-            "Instale as dependências com: python -m pip install -e ."
+            "Instale as dependências com: uv sync"
         )
         print(f"Detalhes: {exc}")
         return 1

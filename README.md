@@ -40,7 +40,7 @@ entradas reconhecidas pelo Windows podem ser selecionadas diretamente.
 - Interface nativa acessível com NVDA e operação completa pelo teclado.
 - Seleção independente do microfone, cabo virtual e dispositivo de retorno.
 - Seleção de um ou mais programas para transmitir junto com o microfone.
-- Volumes independentes, de 0% a 200%, para o microfone e os programas.
+- Volume do microfone de 0% a 100%, com ganho de até 4x, e volume dos programas de 0% a 200%.
 - Reverb ajustado por um único controle simples de 0 a 100.
 - Modificador de voz com presets de pitch e harmonização.
 - Efeitos criativos, modulações, ambientes e controles de intensidade com
@@ -107,13 +107,17 @@ interrompa gravações e chamadas.
 
 ## Instalação para desenvolvimento
 
+Instale o `uv` uma vez, caso ele ainda não esteja disponível:
+
+```powershell
+winget install --id astral-sh.uv --exact
+```
+
 No PowerShell, dentro da pasta do projeto:
 
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-python -m mini_mesa
+uv sync
+uv run proj
 ```
 
 Depois da instalação, também é possível iniciar com:
@@ -147,8 +151,7 @@ pode exigir reinicialização do Windows.
 Instale o Inno Setup 6 e prepare o ambiente uma vez:
 
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e ".[build]"
+uv sync --extra build
 winget install --id JRSoftware.InnoSetup --exact
 ```
 
@@ -485,8 +488,8 @@ estudo sem atrasar a rota usada por gravações e aplicativos de conversa.
 ## Testes
 
 ```powershell
-python -m pip install -e ".[test]"
-python -m pytest
+uv sync --extra test
+uv run python -m pytest
 ```
 
 A suíte valida configurações, preferências, ciclo do motor, continuidade dos
