@@ -10,10 +10,11 @@ import pytest
 from mini_mesa.process_audio import _EXCLUDED, ProcessAudioSource, list_candidate_processes
 
 
-def test_teamtalk_is_not_offered_as_a_transmitted_process() -> None:
-    assert {
+def test_teamtalk_is_offered_as_a_transmitted_process() -> None:
+    assert not {
         "teamtalk.exe", "teamtalk5.exe", "teamtalkclassic.exe", "teamtalk5classic.exe",
-    } <= _EXCLUDED
+    } & _EXCLUDED
+    assert {"explorer.exe", "svchost.exe", "placasom.exe"} <= _EXCLUDED
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Comportamento específico do Windows")
