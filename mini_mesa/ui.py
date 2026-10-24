@@ -2799,6 +2799,30 @@ class MainFrame(wx.Frame):
             except Exception as exc:
                 self.SetStatusText(f"Não foi possível atualizar a transmissão dos programas: {exc}")
 
+    def _current_selected_process_pids(self) -> tuple[int, ...]:
+        """PIDs of the checked programs as they exist right now.
+
+        The list is only a snapshot; a mesa left open for a while holds PIDs
+        of processes that have since exited. Re-resolve the checked programs
+        by name without rebuilding the list, so the screen-reader focus stays.
+        """
+
+        stale = self._selected_process_pids()
+        if not stale:
+            return stale
+        selected_names = {
+            self._process_items[index].name.casefold()
+            for index in self.process_list.GetCheckedItems()
+            if 0 <= index < len(self._process_items)
+        }
+        current = list_candidate_processes()
+        if not current:
+            return stale
+        return tuple(sorted({
+            pid for item in current if item.name.casefold() in selected_names
+            for pid in item.pids
+        }))
+
     def _selected_process_pids(self) -> tuple[int, ...]:
         return tuple(sorted({
             pid
@@ -3385,7 +3409,7 @@ class MainFrame(wx.Frame):
         self.engine.update_pro_audio_settings(self._current_pro_audio_settings())
         self.engine.update_soundboard_settings(self._soundboard_settings)
         self.engine.update_spatial(self._current_spatial_settings())
-        process_pids = self._selected_process_pids()
+        process_pids = self._current_selected_process_pids()
         start_options = {
             "effects_output": self.monitor_choice.GetStringSelection() or None,
         }

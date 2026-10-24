@@ -1031,6 +1031,36 @@ class PedalboardProcessingTests(unittest.TestCase):
         )
         backend.deactivate()
 
+    def test_process_capture_failure_is_not_reported_as_a_microphone_problem(self) -> None:
+        from mini_mesa.process_audio import ProcessCaptureError
+
+        backend = PedalboardBackend()
+        backend._input_ids = {"Microfone": [(1, "Windows WASAPI")]}
+        backend._output_ids = {"Cabo": [(2, "Windows WASAPI")]}
+        device_info = {
+            1: {"max_input_channels": 1, "max_output_channels": 0, "default_samplerate": 44_100.0},
+            2: {"max_input_channels": 0, "max_output_channels": 2, "default_samplerate": 44_100.0},
+        }
+        failure = ProcessCaptureError(
+            "A captura dos programas não foi iniciada: Processo selecionado terminou antes da inicializacao"
+        )
+        with (
+            patch.object(backend, "_refresh_devices"),
+            patch.object(backend._sd, "query_devices", side_effect=lambda device: device_info[device]),
+            patch.object(backend, "_find_common_sample_rate", return_value=44_100.0),
+            patch("mini_mesa.audio_engine.ProcessAudioSource", side_effect=failure),
+        ):
+            with self.assertRaises(RuntimeError) as raised:
+                backend.create_stream(
+                    "Microfone", "Cabo", ReverbSettings(enabled=False), process_pids=(123,)
+                )
+
+        message = str(raised.exception)
+        self.assertIn("programas selecionados", message)
+        self.assertIn("terminou antes da inicializacao", message)
+        self.assertNotIn("abrir o microfone", message)
+        backend.deactivate()
+
     def test_zero_intensity_bypasses_style_modulation_and_ambience(self) -> None:
         timeline = np.arange(512, dtype=np.float32) / 48_000
         mono = (0.10 * np.sin(2 * np.pi * 440.0 * timeline)).astype(np.float32)

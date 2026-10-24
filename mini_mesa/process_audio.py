@@ -40,6 +40,10 @@ def _hidden_subprocess_options() -> dict[str, object]:
     }
 
 
+class ProcessCaptureError(RuntimeError):
+    """The selected programs' audio could not be captured (not a device error)."""
+
+
 @dataclass(frozen=True, slots=True)
 class ProcessItem:
     pids: tuple[int, ...]
@@ -94,7 +98,7 @@ class ProcessAudioSource:
     def __init__(self, numpy_module, pids: tuple[int, ...], sample_rate: float) -> None:
         helper = _helper_path()
         if helper is None:
-            raise RuntimeError(
+            raise ProcessCaptureError(
                 "A captura de programas não está instalada. Reinstale a Mini Mesa "
                 "com o componente nativo de transmissão."
             )
@@ -116,7 +120,7 @@ class ProcessAudioSource:
                 stderr=subprocess.PIPE, **_hidden_subprocess_options(),
             )
         except OSError as exc:
-            raise RuntimeError("Não foi possível iniciar a captura dos programas.") from exc
+            raise ProcessCaptureError("Não foi possível iniciar a captura dos programas.") from exc
         self._reader = threading.Thread(target=self._read, name="mini-mesa-process-audio", daemon=True)
         self._reader.start()
         try:
@@ -129,7 +133,7 @@ class ProcessAudioSource:
                 message = self._process.stderr.read()
             self.close()
             detail = message.decode("utf-8", "replace").strip()
-            raise RuntimeError(
+            raise ProcessCaptureError(
                 "A captura dos programas não foi iniciada"
                 + (f": {detail}" if detail else ".")
             )

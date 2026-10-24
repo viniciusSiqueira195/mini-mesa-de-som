@@ -15,5 +15,9 @@ $environment = Join-Path $installation "VC\Auxiliary\Build\vcvars64.bat"
 if (-not (Test-Path -LiteralPath $environment)) { throw "Ambiente x64 do MSVC não encontrado." }
 
 $object = Join-Path $env:TEMP "mini-mesa-placasom.obj"
-cmd /c "`"$environment`" >nul && cl.exe /nologo /std:c++17 /EHsc /O2 /DUNICODE /D_UNICODE `"$source`" /Fo`"$object`" /Fe:`"$output`""
+# vcvars64.bat shells out to vswhere.exe by bare name on some VS installs.
+# The VS Installer folder is not on PATH by default, so add it just for
+# this subprocess instead of requiring a machine-wide PATH change.
+$vswhereDir = Split-Path -Parent $vswhere
+cmd /c "set `"PATH=$vswhereDir;%PATH%`" && `"$environment`" >nul && cl.exe /nologo /std:c++17 /EHsc /O2 /DUNICODE /D_UNICODE `"$source`" /Fo`"$object`" /Fe:`"$output`""
 if ($LASTEXITCODE -ne 0) { throw "A compilação de Placasom.exe falhou." }

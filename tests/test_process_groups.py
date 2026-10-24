@@ -75,3 +75,36 @@ def test_refresh_does_not_capture_another_app_that_reuses_a_pid():
         ui.MainFrame._refresh_processes(frame)
     assert frame._selected_process_pids() == ()
     frame.engine.update_transmitted_processes.assert_called_once_with(())
+
+
+def make_start_frame(items, checked):
+    frame = make_frame(items, checked)
+    frame._current_selected_process_pids = lambda: ui.MainFrame._current_selected_process_pids(frame)
+    return frame
+
+
+def test_start_resolves_checked_programs_to_pids_alive_now():
+    frame = make_start_frame((ProcessItem((10, 30), "chrome.exe"), ProcessItem((20,), "nvda.exe")), (0,))
+    fresh = (ProcessItem((30, 50), "chrome.exe"), ProcessItem((20,), "nvda.exe"))
+    with patch.object(ui, "list_candidate_processes", return_value=fresh):
+        assert frame._current_selected_process_pids() == (30, 50)
+    frame.process_list.Set.assert_not_called()
+
+
+def test_start_drops_a_checked_program_that_is_no_longer_running():
+    frame = make_start_frame((ProcessItem((10,), "chrome.exe"),), (0,))
+    with patch.object(ui, "list_candidate_processes", return_value=(ProcessItem((20,), "nvda.exe"),)):
+        assert frame._current_selected_process_pids() == ()
+
+
+def test_start_keeps_listed_pids_when_the_inventory_is_unavailable():
+    frame = make_start_frame((ProcessItem((10, 30), "chrome.exe"),), (0,))
+    with patch.object(ui, "list_candidate_processes", return_value=()):
+        assert frame._current_selected_process_pids() == (10, 30)
+
+
+def test_start_does_not_scan_processes_when_nothing_is_checked():
+    frame = make_start_frame((ProcessItem((10,), "chrome.exe"),), ())
+    with patch.object(ui, "list_candidate_processes") as inventory:
+        assert frame._current_selected_process_pids() == ()
+    inventory.assert_not_called()

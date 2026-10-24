@@ -1,5 +1,21 @@
 # Histórico de versões
 
+## 1.2.8 — 2026-09-24
+
+Esta atualização corrige o erro ao ativar a mesa com programas marcados, que
+aparecia como falha ao abrir o microfone.
+
+### Captura de programas
+
+- Ao ativar a mesa, os programas marcados são localizados novamente pelo nome,
+  em vez de usar os identificadores guardados quando a lista foi carregada. Uma
+  mesa aberta por muito tempo, por exemplo durante uma sessão no TeamTalk, não
+  tenta mais capturar processos que já foram encerrados.
+- O componente nativo Placasom.exe ignora processos que terminaram e captura os
+  demais. A captura só falha quando nenhum dos programas escolhidos está aberto.
+- Quando a captura dos programas falha, a mensagem agora diz isso e orienta a
+  atualizar a lista, em vez de sugerir que o microfone está ocupado.
+
 ## 1.2.7 — 2026-09-21
 
 Esta atualização deixa a lista de programas mais simples de usar, especialmente

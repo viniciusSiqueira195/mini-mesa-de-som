@@ -34,7 +34,7 @@ from .soundboard import (
     _resample,
 )
 from .spatial_audio import HRTFSpatializer
-from .process_audio import ProcessAudioSource
+from .process_audio import ProcessAudioSource, ProcessCaptureError
 
 
 _HOST_API_RANKS = {
@@ -932,8 +932,21 @@ class PedalboardBackend:
         _merge_mme_truncated_labels(input_ids)
         _merge_mme_truncated_labels(output_ids)
 
-        for candidates in (*input_ids.values(), *output_ids.values()):
+        for candidates in input_ids.values():
             candidates.sort(key=lambda candidate: _HOST_API_RANKS.get(candidate[1], 99))
+        for candidates in output_ids.values():
+            # A device can expose the same endpoint through several host APIs
+            # with different channel counts (e.g. a WDM-KS variant reporting
+            # mono while WASAPI reports stereo for the same virtual cable).
+            # Trying the mono variant first would silently downmix the whole
+            # transmitted mix, so stereo-capable candidates always win before
+            # falling back to host-API preference.
+            candidates.sort(
+                key=lambda candidate: (
+                    int(devices[candidate[0]]["max_output_channels"]) < 2,
+                    _HOST_API_RANKS.get(candidate[1], 99),
+                )
+            )
 
         self._input_ids = dict(
             sorted(
@@ -1093,6 +1106,15 @@ class PedalboardBackend:
 
         self._effects = None
         self._limiter = None
+        if isinstance(last_error, ProcessCaptureError):
+            # The programs failed, not the microphone: do not send the user
+            # looking for a busy device.
+            raise RuntimeError(
+                "Não foi possível capturar o áudio dos programas selecionados. "
+                "Confirme que eles ainda estão abertos, use Atualizar programas "
+                "e tente ativar a mesa novamente. Se persistir, desmarque os "
+                f"programas e ative a mesa só com o microfone. Detalhes técnicos: {last_error}"
+            ) from last_error
         details = f" Detalhes técnicos: {last_error}" if last_error else ""
         raise RuntimeError(
             f"Não foi possível abrir o microfone '{input_device}' com a saída "
@@ -1672,8 +1694,8 @@ class PedalboardBackend:
                 self._NoiseGate(
                     threshold_db=-42.0,
                     ratio=10.0,
-                    attack_ms=2.0,
-                    release_ms=120.0,
+                    attack_ms=6.0,
+                    release_ms=260.0,
                 )
             )
         if self._pro_audio_settings.expander_enabled:

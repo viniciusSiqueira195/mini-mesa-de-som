@@ -136,8 +136,13 @@ static std::vector<DWORD> SelectedCaptureTargets(const std::vector<DWORD>& pids)
         names[entry.th32ProcessID] = entry.szExeFile;
     } while (Process32NextW(snapshot.value, &entry));
     if (GetLastError() != ERROR_NO_MORE_FILES) throw std::runtime_error("Falha ao terminar enumeracao de processos");
-    for (DWORD pid : pids) if (!pid || !parents.count(pid)) throw std::runtime_error("Processo selecionado terminou antes da inicializacao");
-    auto roots = RootPids(pids, parents);
+    // Applications such as browsers spawn and retire helper processes all the
+    // time, so a PID chosen a moment ago may already be gone. Skip those and
+    // fail only when nothing selected is left to capture.
+    std::vector<DWORD> alive;
+    for (DWORD pid : pids) if (pid && parents.count(pid)) alive.push_back(pid);
+    if (!pids.empty() && alive.empty()) throw std::runtime_error("Processo selecionado terminou antes da inicializacao");
+    auto roots = RootPids(alive, parents);
     std::vector<DWORD> targets;
     for (DWORD root : roots) {
         std::vector<DWORD> webviews;
