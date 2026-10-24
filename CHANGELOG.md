@@ -1,20 +1,76 @@
 # Histórico de versões
 
-## 1.2.8 — 2026-09-24
+## 1.3.0 — 2026-10-24
 
-Esta atualização corrige o erro ao ativar a mesa com programas marcados, que
-aparecia como falha ao abrir o microfone.
+Esta versão traz atalhos globais para mutar o microfone e ativar a mesa, mostra o
+TeamTalk na lista de programas e reduz os estalos ouvidos ao transmitir pelo cabo
+virtual. Ela inclui também as correções da captura de programas, que estavam
+previstas para a versão 1.2.8, e o ganho maior do microfone.
+
+### Atalhos globais para mutar e ativar a mesa
+
+- Em Ferramentas, Configurar atalhos globais, há dois atalhos novos e opcionais: um
+  para mutar e desmutar o microfone e outro para ativar e desativar a mesa. Cada um
+  tem seu modificador e sua tecla, e os dois funcionam com a Mini Mesa minimizada.
+- Como a tela não é vista com a janela escondida, os dois respondem com um som,
+  mesmo com os sons de aviso desligados.
+- A aba Dispositivos ganhou a caixa Mutar microfone, que mostra o estado do mudo e
+  vale junto com o atalho. O mudo continua ao mexer no volume ou reativar a mesa e
+  é desfeito quando o programa é aberto de novo.
+- Dois atalhos com a mesma combinação são recusados com uma mensagem, antes de salvar.
+
+### TeamTalk na lista de programas
+
+- O TeamTalk aparece na lista Programas enviados na transmissão, como os outros
+  aplicativos. Os processos do sistema e da própria Mini Mesa continuam fora.
+- O texto da lista avisa que o programa que recebe a transmissão como microfone, como
+  o TeamTalk ou o Discord ligado ao cabo, não deve ser marcado, senão quem fala com
+  você ouve a própria voz de volta.
+
+### Menos estalos no áudio
+
+- O microfone, o cabo virtual e a captura dos programas funcionam cada um no seu
+  relógio, e a diferença entre eles fazia a fila de áudio transbordar ou esvaziar, o
+  que se ouvia como estalo. Agora, quando a fila sai da faixa ideal, ela é tocada até
+  1% mais rápido ou mais devagar, sem descartar blocos nem inserir silêncio. Sem
+  diferença de relógio, o áudio passa sem nenhuma alteração.
+- A fila da saída aceita seis blocos em vez de quatro, o que absorve um bloco perdido
+  ou dobrado do microfone sem descartar áudio.
+- O áudio dos programas recebe a mesma compensação. Se ele faltar mesmo assim, some e
+  volta com um pequeno desvanecimento, depois de juntar uma reserva, em vez de abrir
+  um buraco seco. Um programa parado deixa de contar como falta.
+- Uma diferença de relógio maior que cerca de 0,5% ainda pode produzir estalos.
+
+### Estatísticas no diagnóstico
+
+- Ferramentas, Abrir diagnóstico mostra agora as estatísticas do áudio da mesa ativa,
+  ou da última ativada: silêncios e blocos descartados no cabo e no retorno, faltas e
+  descartes no áudio dos programas, blocos acima do prazo de processamento, avisos do
+  microfone e quantas correções de relógio foram feitas.
+- Quem ouvir estalos pode copiar o relatório com a mesa ativa, depois de alguns
+  minutos de transmissão, e enviá-lo: os números mostram se o problema vem do ritmo
+  entre os dispositivos, da captura dos programas ou do processamento.
 
 ### Captura de programas
 
-- Ao ativar a mesa, os programas marcados são localizados novamente pelo nome,
-  em vez de usar os identificadores guardados quando a lista foi carregada. Uma
-  mesa aberta por muito tempo, por exemplo durante uma sessão no TeamTalk, não
-  tenta mais capturar processos que já foram encerrados.
+- Ao ativar a mesa, os programas marcados são localizados novamente pelo nome, em vez
+  de usar os identificadores guardados quando a lista foi carregada. Uma mesa aberta
+  por muito tempo, por exemplo durante uma sessão no TeamTalk, não tenta mais capturar
+  processos que já foram encerrados.
 - O componente nativo Placasom.exe ignora processos que terminaram e captura os
   demais. A captura só falha quando nenhum dos programas escolhidos está aberto.
 - Quando a captura dos programas falha, a mensagem agora diz isso e orienta a
   atualizar a lista, em vez de sugerir que o microfone está ocupado.
+- Quando o mesmo dispositivo aparece por mais de uma interface do Windows, a saída
+  estéreo é preferida à mono, o que corrige a transmissão em mono que aparecia de vez
+  em quando no cabo virtual.
+- O noise gate abre e fecha de forma mais suave, sem mudar o momento em que age, para
+  a voz soar menos cortada nas gravações com voz e programas.
+
+### Volume do microfone
+
+- O volume do microfone vai de 0% a 100%, com ganho de até quatro vezes, para quem tem
+  um microfone fraco. O volume dos programas continua de 0% a 200%.
 
 ## 1.2.7 — 2026-09-21
 
