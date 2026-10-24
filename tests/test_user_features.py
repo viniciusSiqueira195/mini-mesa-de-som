@@ -194,9 +194,26 @@ class DiagnosticTests(unittest.TestCase):
         engine.output_devices.return_value = ("CABLE Input", "Fones")
         engine.monitor_devices.return_value = ("Fones",)
         engine.diagnostic_details.return_value = {"api": "Windows WASAPI"}
+        engine.stream_statistics.return_value = {
+            "blocos_processados": 1234,
+            "saidas": {"cabo virtual": {"silencios_por_falta_de_audio": 3}},
+        }
         report = diagnostic_text(
             engine, AppPreferences(input_device="Microfone USB", output_device="CABLE Input")
         )
         self.assertIn("Entradas encontradas (1)", report)
         self.assertIn("Microfone USB", report)
         self.assertIn("Windows WASAPI", report)
+        self.assertIn("Estatísticas do áudio", report)
+        self.assertIn('"blocos_processados": 1234', report)
+        self.assertIn("silencios_por_falta_de_audio", report)
+
+    def test_report_without_statistics_still_works(self):
+        engine = Mock(is_running=False)
+        engine.input_devices.return_value = ()
+        engine.output_devices.return_value = ()
+        engine.monitor_devices.return_value = ()
+        engine.diagnostic_details.return_value = {}
+        engine.stream_statistics.return_value = {}
+        report = diagnostic_text(engine, AppPreferences())
+        self.assertNotIn("Estatísticas do áudio", report)

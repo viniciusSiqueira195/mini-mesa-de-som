@@ -416,6 +416,23 @@ sobrescrever uma importação anterior.
 mesa, os dispositivos escolhidos, as entradas, saídas, retornos e APIs de áudio.
 O relatório é indicado para casos em que algum dispositivo não aparece.
 
+Ele traz também as **estatísticas do áudio** da mesa ativa, ou da última ativada:
+silêncios e blocos descartados no cabo virtual e no retorno, faltas e descartes no
+áudio dos programas, blocos que passaram do prazo de processamento e avisos do
+microfone. Quem ouvir estalos pode copiar o relatório com a mesa ativa, depois de um
+tempo de transmissão, e enviá-lo: os números mostram se o problema vem do ritmo
+entre os dispositivos, da captura dos programas ou do processamento.
+
+## Estalos e relógios dos dispositivos
+
+O microfone, o cabo virtual e a captura dos programas funcionam cada um no seu
+relógio, que nunca coincide por completo. Em vez de descartar um bloco ou inserir
+silêncio quando uma fila enche ou esvazia, o que se ouve como um estalo, a Mini
+Mesa toca a fila até 1 % mais rápido ou mais devagar, só enquanto o nível médio dela
+estiver fora da faixa ideal (`mini_mesa/drift.py`). Sem diferença de relógio, o áudio
+passa sem nenhuma alteração. Se o áudio dos programas chegar a faltar, ele some e
+volta com um pequeno desvanecimento, depois de reunir uma reserva.
+
 ## Indicador textual e avisos locais
 
 O campo **Nível do microfone** informa: sem sinal, microfone baixo, nível adequado
@@ -510,6 +527,7 @@ de áudio temporários, sem acessar microfones físicos nem alterar preferência
 - `mini_mesa/ui.py`: janela wxPython e comportamento acessível.
 - `mini_mesa/audio_engine.py`: dispositivos, ciclo da transmissão e cadeia DSP.
 - `mini_mesa/process_audio.py`: descoberta e captura do áudio de programas.
+- `mini_mesa/drift.py`: compensação da diferença de relógio entre os dispositivos.
 - `placasom.cpp`: componente WASAPI usado para capturar o áudio dos programas.
 - `mini_mesa/noise_reduction.py`: adaptação de streaming e RNNoise nativo.
 - `mini_mesa/spatial_audio.py`: convolução binaural, interpolação e transições.

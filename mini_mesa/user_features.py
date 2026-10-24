@@ -182,6 +182,19 @@ def diagnostic_text(engine, preferences: AppPreferences) -> str:
         f"Retornos encontrados ({len(monitors)}):",
         *(f"- {name}" for name in monitors),
     ]
+    statistics = getattr(engine, "stream_statistics", lambda: {})()
+    if isinstance(statistics, dict) and statistics:
+        lines.extend((
+            "",
+            "Estatísticas do áudio (da mesa ativa, ou da última ativada):",
+            json.dumps(statistics, ensure_ascii=False, indent=2),
+            "Como ler: silencios_por_falta_de_audio e blocos_descartados mostram que o cabo virtual "
+            "ou o retorno perderam o ritmo do microfone; faltas_de_audio e audio_descartado_ms, nos "
+            "programas, mostram falhas da captura dos programas; blocos_acima_do_prazo, maior_bloco_ms "
+            "e avisos_do_microfone indicam que o computador não deu conta do processamento; "
+            "blocos_com_correcao_de_relogio é normal e mostra que a Mini Mesa compensou a diferença "
+            "entre os relógios dos dispositivos.",
+        ))
     if details:
         lines.extend(("", "Detalhes das APIs de áudio:", json.dumps(details, ensure_ascii=False, indent=2)))
     return "\r\n".join(lines)
