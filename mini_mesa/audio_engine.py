@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import threading
+import time
 from dataclasses import replace
 from collections import deque
 from collections.abc import Callable, Sequence
@@ -34,6 +35,7 @@ from .soundboard import (
     _resample,
 )
 from .spatial_audio import HRTFSpatializer
+from .drift import LevelTracker, drift_ratio, frames_needed, resample_block
 from .process_audio import ProcessAudioSource, ProcessCaptureError
 
 
@@ -865,6 +867,7 @@ class PedalboardBackend:
         self._spatializer: HRTFSpatializer | None = None
         self._spatial_settings = SpatialSettings()
         self._active_stream: _MultiOutputSoundDeviceStream | None = None
+        self._last_statistics: dict[str, object] = {}
         self._noise_reduction_enabled = False
         self._noise_reduction_level = 1.0
         self._noise_reducer: RNNoiseReducer | None = None
@@ -1905,8 +1908,24 @@ class PedalboardBackend:
             f"Não foi possível abrir o retorno '{monitor_output}'.{details}"
         )
 
+    def stream_statistics(self) -> dict[str, object]:
+        """Counters of the running mesa, or of the last one when it is stopped."""
+
+        stream = self._active_stream
+        if stream is not None:
+            try:
+                return stream.statistics()
+            except Exception:
+                pass
+        return dict(self._last_statistics)
+
     def deactivate(self) -> None:
         with self._processing_lock:
+            if self._active_stream is not None:
+                try:
+                    self._last_statistics = self._active_stream.statistics()
+                except Exception:
+                    pass
             if self._pitch_shifter is not None:
                 self._pitch_shifter.close(timeout=0.25)
                 self._pitch_shifter = None
@@ -1943,7 +1962,9 @@ class _BufferedAudioOutput:
         self._chunks = deque()
         self._head_offset = 0
         self._queued_frames = 0
-        self._max_queued_frames = self._block_size * 4
+        # Six blocks (64 ms at 512 frames) absorb a missed or doubled microphone block
+        # while the drift controller below brings the level back, instead of dropping audio.
+        self._max_queued_frames = self._block_size * 6
         self._queue_lock = threading.Lock()
         self._prefilled = threading.Event()
         self._last_sample = self._np_zeros(output_channels)
@@ -1951,6 +1972,13 @@ class _BufferedAudioOutput:
         self._needs_crossfade = False
         self._underrun_count = 0
         self._dropped_block_count = 0
+        # Drift between this output's clock and the microphone's: the queue level
+        # is averaged and, when it wanders out of its band, playback runs up to 1 %
+        # faster or slower (mini_mesa.drift) instead of dropping blocks or going silent.
+        self._level = LevelTracker()
+        self._phase = 0.0
+        self._drift_corrections = 0
+        self._peak_queued_frames = 0
         self.stream = sounddevice.OutputStream(
             device=output_id,
             samplerate=sample_rate,
@@ -1969,6 +1997,8 @@ class _BufferedAudioOutput:
         try:
             self._chunks.append(processed)
             self._queued_frames += processed.shape[0]
+            if self._queued_frames > self._peak_queued_frames:
+                self._peak_queued_frames = self._queued_frames
             while self._queued_frames > self._max_queued_frames and self._chunks:
                 removed = self._chunks.popleft()
                 self._queued_frames -= removed.shape[0] - self._head_offset
@@ -1989,6 +2019,8 @@ class _BufferedAudioOutput:
             self._last_sample = self._np_zeros(self._output_channels)
             self._underrun = True
             self._needs_crossfade = False
+            self._phase = 0.0
+            self._level.reset()
             self._prefilled.clear()
 
     def wait_until_prefilled(self, timeout: float) -> bool:
@@ -2000,6 +2032,16 @@ class _BufferedAudioOutput:
         with self._queue_lock:
             if _status:
                 self._needs_crossfade = True
+            ratio = self._drift_ratio()
+            if ratio == 1.0:
+                self._phase = 0.0
+            elif (
+                not self._underrun
+                and not self._needs_crossfade
+                and self._read_resampled(outdata, frames, ratio)
+            ):
+                self._drift_corrections += 1
+                return
             while written < frames and self._chunks:
                 chunk = self._chunks[0]
                 available = chunk.shape[0] - self._head_offset
@@ -2039,6 +2081,54 @@ class _BufferedAudioOutput:
                 if not self._underrun:
                     self._underrun_count += 1
                 self._underrun = True
+
+    def _drift_ratio(self) -> float:
+        average = self._level.update(self._queued_frames)
+        if average is None:
+            return 1.0
+        block = self._block_size
+        return drift_ratio(average, 2.25 * block, 3.5 * block, block)
+
+    def _read_resampled(self, outdata, frames: int, ratio: float) -> bool:
+        """Play ``frames`` from the queue at speed ``ratio``; False when it holds too little."""
+
+        import numpy as np
+
+        needed = frames_needed(frames, ratio, self._phase)
+        if self._queued_frames < needed:
+            return False
+        parts = []
+        gathered = 0
+        offset = self._head_offset
+        for chunk in self._chunks:
+            part = np.asarray(chunk[offset:], dtype=np.float32)
+            offset = 0
+            parts.append(part.reshape(len(part), -1))
+            gathered += len(part)
+            if gathered >= needed:
+                break
+        source = self._adapt_channels(np.concatenate(parts, axis=0)[:needed])
+        block, consumed, self._phase = resample_block(np, source, frames, ratio, self._phase)
+        outdata[:frames, :] = block
+        self._last_sample = block[-1].copy()
+        while consumed > 0 and self._chunks:
+            chunk = self._chunks[0]
+            count = min(consumed, chunk.shape[0] - self._head_offset)
+            self._head_offset += count
+            self._queued_frames -= count
+            consumed -= count
+            if self._head_offset == chunk.shape[0]:
+                self._chunks.popleft()
+                self._head_offset = 0
+        return True
+
+    def statistics(self) -> dict[str, object]:
+        return {
+            "silencios_por_falta_de_audio": self._underrun_count,
+            "blocos_descartados": self._dropped_block_count,
+            "blocos_com_correcao_de_relogio": self._drift_corrections,
+            "fila_maxima_em_blocos": round(self._peak_queued_frames / max(1, self._block_size), 2),
+        }
 
     @staticmethod
     def _np_zeros(channels: int):
@@ -2101,6 +2191,9 @@ class _MultiOutputSoundDeviceStream:
         self._stop_event = threading.Event()
         self._first_audio = threading.Event()
         self._captured_blocks = 0
+        self._input_status_count = 0
+        self._callback_overruns = 0
+        self._callback_max_ms = 0.0
         self._prefill_blocks = 3 if len(outputs) > 1 else 2
         self._error: Exception | None = None
         self._validating = False
@@ -2215,6 +2308,9 @@ class _MultiOutputSoundDeviceStream:
     def _on_input(self, indata, frames, _time_info, _status) -> None:
         if self._validating:
             return
+        started = time.perf_counter()
+        if _status:
+            self._input_status_count += 1
         try:
             voice_processed = self._processor(indata, frames)
             proc_audio = None
@@ -2265,6 +2361,40 @@ class _MultiOutputSoundDeviceStream:
         self._captured_blocks += 1
         if self._captured_blocks >= self._prefill_blocks:
             self._first_audio.set()
+        elapsed = time.perf_counter() - started
+        if elapsed * 1000.0 > self._callback_max_ms:
+            self._callback_max_ms = elapsed * 1000.0
+        if elapsed > frames / self._sample_rate:
+            self._callback_overruns += 1
+
+    def statistics(self) -> dict[str, object]:
+        """Counters that tell a clock or CPU problem apart, for the diagnostic report."""
+
+        with self._outputs_lock:
+            outputs = list(self._outputs)
+        labels = ("cabo virtual", "retorno")
+        report: dict[str, object] = {
+            "taxa_hz": round(self._sample_rate),
+            "bloco_em_quadros": self._block_size,
+            "prazo_do_bloco_ms": round(self._block_size / self._sample_rate * 1000.0, 2),
+            "blocos_processados": self._captured_blocks,
+            "avisos_do_microfone": self._input_status_count,
+            "blocos_acima_do_prazo": self._callback_overruns,
+            "maior_bloco_ms": round(self._callback_max_ms, 2),
+            "saidas": {
+                labels[index] if index < len(labels) else f"saida {index + 1}": output.statistics()
+                for index, output in enumerate(outputs)
+            },
+        }
+        with self._process_source_lock:
+            sources = (
+                ("programas_transmitidos", self._process_source),
+                ("programas_do_retorno", self._playback_process_source),
+            )
+        for label, source in sources:
+            if source is not None and hasattr(source, "statistics"):
+                report[label] = source.statistics()
+        return report
 
     def set_monitor_voice(self, enabled: bool) -> None:
         with self._outputs_lock:
@@ -2445,6 +2575,10 @@ class AudioEngine:
 
     def diagnostic_details(self) -> dict[str, object]:
         method = getattr(self._backend, "diagnostic_details", None)
+        return method() if method is not None else {}
+
+    def stream_statistics(self) -> dict[str, object]:
+        method = getattr(self._backend, "stream_statistics", None)
         return method() if method is not None else {}
 
     def update_settings(self, settings: ReverbSettings) -> None:

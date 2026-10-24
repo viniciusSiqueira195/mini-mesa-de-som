@@ -155,6 +155,38 @@ class GlobalHotkeyTests(unittest.TestCase):
         toggle.assert_called_once_with()
 
 
+    def test_registers_extra_shortcuts_only_when_enabled(self):
+        window = Mock()
+        window.RegisterHotKey.return_value = True
+        manager = GlobalHotkeyManager(window)
+        mute, table, off = Mock(), Mock(), Mock()
+
+        with patch("mini_mesa.global_hotkeys.wx.NewIdRef", side_effect=range(10, 20)):
+            manager.apply(
+                enabled=False,
+                effect_modifier="control",
+                page_modifier="alt",
+                play=Mock(),
+                select_page=Mock(),
+                stop=Mock(),
+                extra_shortcuts=(
+                    (True, "control_alt", "S", mute),
+                    (True, "alt", "A", table),
+                    (False, "alt", "Z", off),
+                ),
+            )
+
+        self.assertEqual(window.RegisterHotKey.call_count, 2)
+        self.assertEqual(
+            [call.args[2] for call in window.RegisterHotKey.call_args_list], [ord("S"), ord("A")]
+        )
+        window.Bind.call_args_list[0].args[1](None)
+        window.Bind.call_args_list[1].args[1](None)
+        mute.assert_called_once_with()
+        table.assert_called_once_with()
+        off.assert_not_called()
+
+
 class DiagnosticTests(unittest.TestCase):
     def test_report_is_readable_and_contains_devices(self):
         engine = Mock(is_running=False)
@@ -162,9 +194,26 @@ class DiagnosticTests(unittest.TestCase):
         engine.output_devices.return_value = ("CABLE Input", "Fones")
         engine.monitor_devices.return_value = ("Fones",)
         engine.diagnostic_details.return_value = {"api": "Windows WASAPI"}
+        engine.stream_statistics.return_value = {
+            "blocos_processados": 1234,
+            "saidas": {"cabo virtual": {"silencios_por_falta_de_audio": 3}},
+        }
         report = diagnostic_text(
             engine, AppPreferences(input_device="Microfone USB", output_device="CABLE Input")
         )
         self.assertIn("Entradas encontradas (1)", report)
         self.assertIn("Microfone USB", report)
         self.assertIn("Windows WASAPI", report)
+        self.assertIn("Estatísticas do áudio", report)
+        self.assertIn('"blocos_processados": 1234', report)
+        self.assertIn("silencios_por_falta_de_audio", report)
+
+    def test_report_without_statistics_still_works(self):
+        engine = Mock(is_running=False)
+        engine.input_devices.return_value = ()
+        engine.output_devices.return_value = ()
+        engine.monitor_devices.return_value = ()
+        engine.diagnostic_details.return_value = {}
+        engine.stream_statistics.return_value = {}
+        report = diagnostic_text(engine, AppPreferences())
+        self.assertNotIn("Estatísticas do áudio", report)

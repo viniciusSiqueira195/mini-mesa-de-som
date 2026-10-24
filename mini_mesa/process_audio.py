@@ -17,12 +17,13 @@ from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 
+from .drift import LevelTracker, drift_ratio, frames_needed, resample_block
+
 
 _EXCLUDED = frozenset({
     "audiodg.exe", "csrss.exe", "dwm.exe", "explorer.exe", "lsass.exe",
     "mini_mesa.exe", "minimesadesom.exe", "placasom.exe", "services.exe",
-    "smss.exe", "svchost.exe", "system.exe", "teamtalk.exe", "teamtalk5.exe",
-    "teamtalkclassic.exe", "teamtalk5classic.exe", "wininit.exe", "winlogon.exe",
+    "smss.exe", "svchost.exe", "system.exe", "wininit.exe", "winlogon.exe",
 })
 
 
@@ -92,8 +93,21 @@ def _helper_path() -> Path | None:
     return None
 
 
+# Frames used to fade a gap in the programs' audio out and back in, so a hole is never a click.
+_GAP_FADE_FRAMES = 32
+
+
 class ProcessAudioSource:
     """Non-blocking reader for PCM emitted by ``Placasom.exe --capture``."""
+
+    # Defaults so a source built without ``__init__`` (tests) behaves like a fresh one.
+    _resume_frames = 0
+    _phase = 0.0
+    _fade_in = False
+    _drift_corrections = 0
+    _dropped_frames = 0
+    _sample_rate = 48_000.0
+    _level: LevelTracker | None = None
 
     def __init__(self, numpy_module, pids: tuple[int, ...], sample_rate: float) -> None:
         helper = _helper_path()
@@ -103,6 +117,7 @@ class ProcessAudioSource:
                 "com o componente nativo de transmissão."
             )
         self._np = numpy_module
+        self._sample_rate = float(sample_rate)
         self._lock = threading.Lock()
         self._samples = deque()
         self._available = 0
@@ -166,6 +181,7 @@ class ProcessAudioSource:
                 while self._available > 96_000 and self._samples:
                     dropped = self._samples.popleft()
                     self._available -= len(dropped)
+                    self._dropped_frames += len(dropped)
 
     def set_prebuffer_frames(self, frames: int) -> None:
         """Gate playback until a small, non-blocking jitter buffer is ready."""
@@ -184,13 +200,29 @@ class ProcessAudioSource:
             return self._underflow_count
 
     def take(self, frames: int):
-        output = self._np.zeros((frames, 2), dtype=self._np.float32)
-        written = 0
+        """Return ``frames`` of program audio, absorbing clock drift and gaps without clicks.
+
+        The helper process captures on the programs' clock while the mixer pulls on the
+        microphone's.  While the buffered amount stays in its band the audio is copied
+        as is; when it wanders out, playback runs up to 1 % faster or slower
+        (``mini_mesa.drift``).  If the buffer does run dry the audio fades out, stays
+        silent until a small reserve is back and fades in again.
+        """
+
+        np = self._np
+        output = np.zeros((frames, 2), dtype=np.float32)
         with self._lock:
             if not self._primed:
-                if self._available < self._prebuffer_frames:
+                if self._available < (self._resume_frames or self._prebuffer_frames):
                     return output
                 self._primed = True
+                self._resume_frames = 0
+            ratio = self._drift_ratio()
+            if ratio != 1.0 and self._take_resampled(output, frames, ratio):
+                self._drift_corrections += 1
+                return output
+            self._phase = 0.0
+            written = 0
             while written < frames and self._samples:
                 block = self._samples[0]
                 count = min(frames - written, len(block))
@@ -201,11 +233,65 @@ class ProcessAudioSource:
                     self._samples.popleft()
                 else:
                     self._samples[0] = block[count:]
+            if written and self._fade_in:
+                fade = min(_GAP_FADE_FRAMES, written)
+                output[:fade] *= np.linspace(0.0, 1.0, fade, dtype=np.float32)[:, None]
+                self._fade_in = False
             if written < frames:
-                self._underflow_count += 1
+                if written:
+                    fade = min(_GAP_FADE_FRAMES, written)
+                    output[written - fade:written] *= np.linspace(1.0, 0.0, fade, dtype=np.float32)[:, None]
+                    self._underflow_count += 1
+                    self._fade_in = True
+                    self._primed = False
+                    self._resume_frames = max(frames * 2, self._prebuffer_frames // 2)
+                    self._level = None
         return output
 
+    def _drift_ratio(self) -> float:
+        if self._prebuffer_frames <= 0:
+            return 1.0
+        if self._level is None:
+            self._level = LevelTracker()
+        average = self._level.update(self._available)
+        if average is None:
+            return 1.0
+        reserve = self._prebuffer_frames
+        return drift_ratio(average, 0.75 * reserve, 1.5 * reserve, 0.25 * reserve)
 
+    def _take_resampled(self, output, frames: int, ratio: float) -> bool:
+        np = self._np
+        needed = frames_needed(frames, ratio, self._phase)
+        if self._available < needed:
+            return False
+        parts = []
+        gathered = 0
+        for block in self._samples:
+            parts.append(block)
+            gathered += len(block)
+            if gathered >= needed:
+                break
+        source = np.concatenate(parts, axis=0)[:needed]
+        block, consumed, self._phase = resample_block(np, source, frames, ratio, self._phase)
+        output[:] = block
+        self._available -= consumed
+        while consumed > 0 and self._samples:
+            head = self._samples[0]
+            if consumed >= len(head):
+                consumed -= len(head)
+                self._samples.popleft()
+            else:
+                self._samples[0] = head[consumed:]
+                consumed = 0
+        return True
+
+    def statistics(self) -> dict[str, object]:
+        with self._lock:
+            return {
+                "faltas_de_audio": self._underflow_count,
+                "blocos_com_correcao_de_relogio": self._drift_corrections,
+                "audio_descartado_ms": round(self._dropped_frames / max(1.0, float(self._sample_rate)) * 1000.0),
+            }
 
     def close(self) -> None:
         self._stopped.set()

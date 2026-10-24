@@ -141,6 +141,7 @@ class NotebookTests(unittest.TestCase):
         dialog = Mock()
         dialog.ShowModal.return_value = ui.wx.ID_OK
         dialog.values = (False, "control", "alt", True, "control_alt", "Q", True)
+        dialog.extra_shortcuts = (True, "control_alt", "S", True, "alt", "A")
         with (
             patch.object(ui, "HotkeySettingsDialog", return_value=dialog),
             patch.object(self.frame, "_apply_global_hotkeys", return_value=True),
@@ -151,9 +152,62 @@ class NotebookTests(unittest.TestCase):
         self.assertTrue(self.frame.preferences.window_toggle_shortcut_enabled)
         self.assertEqual(self.frame.preferences.window_toggle_shortcut_modifier, "control_alt")
         self.assertEqual(self.frame.preferences.window_toggle_shortcut_key, "Q")
+        self.assertTrue(self.frame.preferences.mic_mute_shortcut_enabled)
+        self.assertEqual(self.frame.preferences.mic_mute_shortcut_key, "S")
+        self.assertTrue(self.frame.preferences.table_toggle_shortcut_enabled)
+        self.assertEqual(self.frame.preferences.table_toggle_shortcut_modifier, "alt")
         self.assertTrue(self.frame.preferences.launch_at_startup)
         configure_startup.assert_called_once_with(True)
         self.store.save.assert_called_once_with(self.frame.preferences)
+
+    def test_hotkey_settings_refuse_two_shortcuts_with_the_same_combination(self) -> None:
+        dialog = Mock()
+        dialog.ShowModal.return_value = ui.wx.ID_OK
+        dialog.values = (False, "control", "alt", True, "control_alt", "Q", False)
+        dialog.extra_shortcuts = (True, "control_alt", "Q", False, "alt", "A")
+        with (
+            patch.object(ui, "HotkeySettingsDialog", return_value=dialog),
+            patch.object(self.frame, "_apply_global_hotkeys", return_value=True) as apply,
+            patch.object(self.frame, "_show_error") as show_error,
+        ):
+            self.frame._on_hotkey_settings(None)
+
+        show_error.assert_called_once()
+        apply.assert_not_called()
+        self.assertFalse(self.frame.preferences.mic_mute_shortcut_enabled)
+        self.store.save.assert_not_called()
+
+    def test_mute_shortcut_silences_and_restores_the_microphone_without_stopping_the_mixer(self) -> None:
+        self.frame.microphone_volume.SetValue(50)
+        self.frame.process_volume.SetValue(100)
+        with patch.object(self.frame, "_play_feedback") as feedback:
+            self.frame.toggle_microphone_mute()
+            self.engine.set_volumes.assert_called_with(0.0, 1.0)
+            self.assertTrue(self.frame.mute_checkbox.GetValue())
+            feedback.assert_called_with("mute", force=True)
+
+            self.frame.toggle_microphone_mute()
+            self.engine.set_volumes.assert_called_with(2.0, 1.0)
+            self.assertFalse(self.frame.mute_checkbox.GetValue())
+            feedback.assert_called_with("unmute", force=True)
+        self.engine.stop.assert_not_called()
+
+    def test_mute_survives_moving_the_volume_slider_and_restarting_the_mixer(self) -> None:
+        self.frame.toggle_microphone_mute()
+        self.engine.set_volumes.reset_mock()
+        self.frame.microphone_volume.SetValue(80)
+        self.frame._on_native_volume_changed(ui.wx.CommandEvent())
+        self.engine.set_volumes.assert_called_with(0.0, self.frame.process_volume.GetValue() / 100.0)
+
+    def test_table_shortcut_toggles_the_mixer_and_answers_with_a_sound(self) -> None:
+        with (
+            patch.object(self.frame, "_play_feedback") as feedback,
+            patch.object(self.frame, "_on_toggle") as toggle,
+        ):
+            toggle.side_effect = lambda _event: setattr(self.engine, "is_running", False)
+            self.frame.toggle_table_from_shortcut()
+            toggle.assert_called_once_with(None)
+            feedback.assert_called_once_with("stop", force=True)
 
     def test_minimize_hides_and_notifies_then_restore_stays_visible(self) -> None:
         tray = Mock(is_available=True)

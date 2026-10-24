@@ -217,7 +217,7 @@ class FakeSoundDevice:
 
 
 class BufferedAudioOutputTests(unittest.TestCase):
-    def test_buffer_is_capped_at_four_blocks_to_prevent_growing_delay(self) -> None:
+    def test_buffer_is_capped_at_six_blocks_to_prevent_growing_delay(self) -> None:
         sounddevice = FakeSoundDevice()
         output = _BufferedAudioOutput(
             sounddevice=sounddevice,
@@ -227,10 +227,10 @@ class BufferedAudioOutputTests(unittest.TestCase):
             block_size=4,
         )
 
-        for block_number in range(5):
+        for block_number in range(7):
             output.push(np.full(4, block_number, dtype=np.float32))
 
-        self.assertEqual(output._queued_frames, 16)
+        self.assertEqual(output._queued_frames, 24)
         self.assertEqual(output._chunks[0][0], 1)
         self.assertEqual(output._dropped_block_count, 1)
         self.assertTrue(output._needs_crossfade)
@@ -525,6 +525,36 @@ class MultiOutputStreamTests(unittest.TestCase):
         self.assertEqual(primary._queued_frames, 4)
         self.assertEqual(monitor._queued_frames, 0)
         self.assertEqual(monitor._dropped_block_count, 1)
+        stream.close()
+
+    def test_statistics_report_clock_and_cpu_counters_for_the_diagnostic(self) -> None:
+        source = Mock()
+        source.take.return_value = np.zeros((4, 2), dtype=np.float32)
+        source.statistics.return_value = {"faltas_de_audio": 2}
+        stream = _MultiOutputSoundDeviceStream(
+            sounddevice=FakeSoundDevice(),
+            input_id=1,
+            outputs=[(2, 2), (3, 2)],
+            sample_rate=48_000,
+            input_channels=1,
+            block_size=4,
+            processor=lambda samples, _frames: samples,
+            process_source=source,
+        )
+        stream._on_input(np.ones((4, 1), dtype=np.float32), 4, None, "input overflow")
+        stream._on_input(np.ones((4, 1), dtype=np.float32), 4, None, None)
+
+        report = stream.statistics()
+
+        self.assertEqual(report["taxa_hz"], 48_000)
+        self.assertEqual(report["bloco_em_quadros"], 4)
+        self.assertEqual(report["blocos_processados"], 2)
+        self.assertEqual(report["avisos_do_microfone"], 1)
+        self.assertEqual(report["blocos_acima_do_prazo"], 0)
+        self.assertGreaterEqual(report["maior_bloco_ms"], 0.0)
+        self.assertEqual(set(report["saidas"]), {"cabo virtual", "retorno"})
+        self.assertEqual(report["saidas"]["cabo virtual"]["blocos_descartados"], 0)
+        self.assertEqual(report["programas_transmitidos"], {"faltas_de_audio": 2})
         stream.close()
 
     def test_removing_monitor_closes_only_the_monitor_output(self) -> None:

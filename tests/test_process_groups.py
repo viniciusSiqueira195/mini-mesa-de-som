@@ -12,13 +12,17 @@ from mini_mesa.process_audio import ProcessItem, list_candidate_processes
 def test_inventory_groups_executables_without_losing_pids():
     inventory = Mock(stdout='\n'.join([
         '"chrome.exe","30"', '"Chrome.EXE","10"', '"chrome.exe","30"',
-        '"nvda.exe","20"', '"teamtalk.exe","40"',
+        '"nvda.exe","20"', '"teamtalk.exe","40"', '"explorer.exe","50"',
         '"invalid.exe","bad"', '"zero.exe","0"',
     ]))
     with patch("mini_mesa.process_audio.subprocess.run", return_value=inventory):
         groups = list_candidate_processes()
-    assert groups == (ProcessItem((10, 30), "chrome.exe"), ProcessItem((20,), "nvda.exe"))
-    assert [group.label for group in groups] == ["chrome.exe", "nvda.exe"]
+    assert groups == (
+        ProcessItem((10, 30), "chrome.exe"),
+        ProcessItem((20,), "nvda.exe"),
+        ProcessItem((40,), "teamtalk.exe"),
+    )
+    assert [group.label for group in groups] == ["chrome.exe", "nvda.exe", "teamtalk.exe"]
 
 
 def make_frame(items=(), checked=(), saved=(), running=False):

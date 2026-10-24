@@ -1285,6 +1285,16 @@ class HotkeySettingsDialog(wx.Dialog):
             self._WINDOW_KEYS.index(preferences.window_toggle_shortcut_key)
         )
         root.Add(self.window_toggle_key, 0, wx.ALL | wx.EXPAND, 12)
+        self.mic_mute_enabled, self.mic_mute_modifier, self.mic_mute_key = self._add_shortcut_group(
+            root, "Ativar atalho para &mutar e desmutar o microfone", "do microfone",
+            preferences.mic_mute_shortcut_enabled,
+            preferences.mic_mute_shortcut_modifier, preferences.mic_mute_shortcut_key,
+        )
+        self.table_toggle_enabled, self.table_toggle_modifier, self.table_toggle_key = self._add_shortcut_group(
+            root, "Ativar atalho para ativar e desativar a m&esa", "da mesa",
+            preferences.table_toggle_shortcut_enabled,
+            preferences.table_toggle_shortcut_modifier, preferences.table_toggle_shortcut_key,
+        )
         self.launch_at_startup = wx.CheckBox(
             self, label="Iniciar a Mini Mesa com o &Windows"
         )
@@ -1320,6 +1330,35 @@ class HotkeySettingsDialog(wx.Dialog):
 
         self._update_window_toggle_controls(None)
 
+    def _add_shortcut_group(
+        self, root: wx.BoxSizer, label: str, name: str, enabled: bool, modifier: str, key: str
+    ) -> tuple[wx.CheckBox, wx.Choice, wx.Choice]:
+        checkbox = wx.CheckBox(self, label=label)
+        checkbox.SetValue(enabled)
+        root.Add(checkbox, 0, wx.ALL | wx.EXPAND, 12)
+        root.Add(wx.StaticText(self, label=f"Modificador do atalho {name}:"), 0, wx.LEFT | wx.RIGHT, 12)
+        modifier_choice = wx.Choice(
+            self, choices=[modifier_label(value) for value in self._WINDOW_VALUES]
+        )
+        _set_choice_accessible_name(modifier_choice, f"Modificador do atalho {name}")
+        modifier_choice.SetSelection(self._WINDOW_VALUES.index(modifier))
+        root.Add(modifier_choice, 0, wx.ALL | wx.EXPAND, 12)
+        root.Add(wx.StaticText(self, label=f"Tecla do atalho {name}:"), 0, wx.LEFT | wx.RIGHT, 12)
+        key_choice = wx.Choice(self, choices=self._WINDOW_KEYS)
+        _set_choice_accessible_name(key_choice, f"Tecla do atalho {name}")
+        key_choice.SetSelection(self._WINDOW_KEYS.index(key))
+        root.Add(key_choice, 0, wx.ALL | wx.EXPAND, 12)
+
+        def update(event: wx.CommandEvent | None) -> None:
+            modifier_choice.Enable(checkbox.GetValue())
+            key_choice.Enable(checkbox.GetValue())
+            if event is not None:
+                event.Skip()
+
+        checkbox.Bind(wx.EVT_CHECKBOX, update)
+        update(None)
+        return checkbox, modifier_choice, key_choice
+
     def _update_window_toggle_controls(self, event: wx.CommandEvent | None) -> None:
         enabled = self.window_toggle_enabled.GetValue()
         self.window_toggle_modifier.Enable(enabled)
@@ -1337,6 +1376,19 @@ class HotkeySettingsDialog(wx.Dialog):
             self._WINDOW_VALUES[self.window_toggle_modifier.GetSelection()],
             self._WINDOW_KEYS[self.window_toggle_key.GetSelection()],
             self.launch_at_startup.GetValue(),
+        )
+
+
+    @property
+    def extra_shortcuts(self) -> tuple[bool, str, str, bool, str, str]:
+        """Mute-microphone and toggle-table shortcuts: (enabled, modifier, key) for each."""
+        return (
+            self.mic_mute_enabled.GetValue(),
+            self._WINDOW_VALUES[self.mic_mute_modifier.GetSelection()],
+            self._WINDOW_KEYS[self.mic_mute_key.GetSelection()],
+            self.table_toggle_enabled.GetValue(),
+            self._WINDOW_VALUES[self.table_toggle_modifier.GetSelection()],
+            self._WINDOW_KEYS[self.table_toggle_key.GetSelection()],
         )
 
 
@@ -1371,6 +1423,7 @@ class MainFrame(wx.Frame):
         self._tray_icon: SystemTrayIcon | None = None
         self._last_focused_control: wx.Window | None = None
         self._minimize_generation = 0
+        self._microphone_muted = False
         self._restoring_from_tray: bool = False
         self._last_toggle_time: float = 0.0
         self._update_check_in_progress = False
@@ -1465,7 +1518,10 @@ class MainFrame(wx.Frame):
             process_panel,
             label=("Marque os programas cujo áudio será misturado ao microfone. "
                    "Cada programa reúne seus processos em um único item. "
-                   "As alterações são aplicadas mesmo com a mesa ativa."),
+                   "As alterações são aplicadas mesmo com a mesa ativa. "
+                   "Não marque o programa que recebe a transmissão como microfone, "
+                   "como o TeamTalk ou o Discord, senão quem fala com você ouvirá a "
+                   "própria voz de volta."),
         )
         process_help.Wrap(540)
         self.process_list = wx.CheckListBox(process_panel)
@@ -1502,6 +1558,10 @@ class MainFrame(wx.Frame):
         self.process_volume.Bind(wx.EVT_SLIDER, self._on_native_volume_changed)
         volumes.Add(wx.StaticText(volume_panel, label="Volume do &microfone:"), 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
         volumes.Add(self.microphone_volume, 0, wx.ALL | wx.EXPAND, 8)
+        self.mute_checkbox = wx.CheckBox(volume_panel, label="Mutar microfone")
+        self.mute_checkbox.SetName("Mutar microfone")
+        self.mute_checkbox.Bind(wx.EVT_CHECKBOX, self._on_mute_toggled)
+        volumes.Add(self.mute_checkbox, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 8)
         volumes.Add(wx.StaticText(volume_panel, label="Volume dos &programas:"), 0, wx.LEFT | wx.RIGHT | wx.TOP, 8)
         volumes.Add(self.process_volume, 0, wx.ALL | wx.EXPAND, 8)
         devices_root.Add(volumes, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
@@ -2243,6 +2303,20 @@ class MainFrame(wx.Frame):
                 window_toggle_enabled=self.preferences.window_toggle_shortcut_enabled,
                 window_toggle_modifier=self.preferences.window_toggle_shortcut_modifier,
                 window_toggle_key=self.preferences.window_toggle_shortcut_key,
+                extra_shortcuts=(
+                    (
+                        self.preferences.mic_mute_shortcut_enabled,
+                        self.preferences.mic_mute_shortcut_modifier,
+                        self.preferences.mic_mute_shortcut_key,
+                        self.toggle_microphone_mute,
+                    ),
+                    (
+                        self.preferences.table_toggle_shortcut_enabled,
+                        self.preferences.table_toggle_shortcut_modifier,
+                        self.preferences.table_toggle_shortcut_key,
+                        self.toggle_table_from_shortcut,
+                    ),
+                ),
             )
             return True
         except RuntimeError as exc:
@@ -2270,8 +2344,31 @@ class MainFrame(wx.Frame):
                 window_toggle_key,
                 launch_at_startup,
             ) = dialog.values
+            (
+                mic_mute_enabled,
+                mic_mute_modifier,
+                mic_mute_key,
+                table_toggle_enabled,
+                table_toggle_modifier,
+                table_toggle_key,
+            ) = dialog.extra_shortcuts
         finally:
             dialog.Destroy()
+        combinations = [
+            (modifier, key)
+            for on, modifier, key in (
+                (window_toggle_enabled, window_toggle_modifier, window_toggle_key),
+                (mic_mute_enabled, mic_mute_modifier, mic_mute_key),
+                (table_toggle_enabled, table_toggle_modifier, table_toggle_key),
+            )
+            if on
+        ]
+        if len(set(combinations)) != len(combinations):
+            self._show_error(
+                "Dois atalhos estão com a mesma combinação. Escolha uma tecla ou um "
+                "modificador diferente para cada um."
+            )
+            return
         previous = self.preferences
         self.preferences = replace(
             self._current_preferences(),
@@ -2281,6 +2378,12 @@ class MainFrame(wx.Frame):
             window_toggle_shortcut_enabled=window_toggle_enabled,
             window_toggle_shortcut_modifier=window_toggle_modifier,
             window_toggle_shortcut_key=window_toggle_key,
+            mic_mute_shortcut_enabled=mic_mute_enabled,
+            mic_mute_shortcut_modifier=mic_mute_modifier,
+            mic_mute_shortcut_key=mic_mute_key,
+            table_toggle_shortcut_enabled=table_toggle_enabled,
+            table_toggle_shortcut_modifier=table_toggle_modifier,
+            table_toggle_shortcut_key=table_toggle_key,
             launch_at_startup=launch_at_startup,
         )
         if not self._apply_global_hotkeys():
@@ -2428,8 +2531,8 @@ class MainFrame(wx.Frame):
             return
         self._play_feedback("page")
 
-    def _play_feedback(self, kind: str) -> None:
-        if kind != "recording_start" and not self.preferences.feedback_sounds_enabled:
+    def _play_feedback(self, kind: str, *, force: bool = False) -> None:
+        if kind != "recording_start" and not force and not self.preferences.feedback_sounds_enabled:
             return
         try:
             import winsound
@@ -2440,7 +2543,10 @@ class MainFrame(wx.Frame):
                     winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_NODEFAULT,
                 )
                 return
-            sound = winsound.MB_OK if kind in {"start", "page"} else winsound.MB_ICONASTERISK
+            if kind == "mute":
+                winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
+                return
+            sound = winsound.MB_OK if kind in {"start", "page", "unmute"} else winsound.MB_ICONASTERISK
             winsound.MessageBeep(sound)
         except (ImportError, RuntimeError):
             pass
@@ -2764,7 +2870,7 @@ class MainFrame(wx.Frame):
     def _on_native_volume_changed(self, event: wx.Event) -> None:
         setter = getattr(self.engine, "set_volumes", None)
         if setter is not None:
-            setter(self.microphone_volume.GetValue() / 25.0, self.process_volume.GetValue() / 100.0)
+            setter(self._microphone_gain(), self.process_volume.GetValue() / 100.0)
         self._save_preferences()
         event.Skip()
 
@@ -3010,6 +3116,12 @@ class MainFrame(wx.Frame):
             window_toggle_shortcut_enabled=self.preferences.window_toggle_shortcut_enabled,
             window_toggle_shortcut_modifier=self.preferences.window_toggle_shortcut_modifier,
             window_toggle_shortcut_key=self.preferences.window_toggle_shortcut_key,
+            mic_mute_shortcut_enabled=self.preferences.mic_mute_shortcut_enabled,
+            mic_mute_shortcut_modifier=self.preferences.mic_mute_shortcut_modifier,
+            mic_mute_shortcut_key=self.preferences.mic_mute_shortcut_key,
+            table_toggle_shortcut_enabled=self.preferences.table_toggle_shortcut_enabled,
+            table_toggle_shortcut_modifier=self.preferences.table_toggle_shortcut_modifier,
+            table_toggle_shortcut_key=self.preferences.table_toggle_shortcut_key,
             launch_at_startup=self.preferences.launch_at_startup,
             feedback_sounds_enabled=self.preferences.feedback_sounds_enabled,
             soundboard_volume_percent=self._soundboard_settings.volume_percent,
@@ -3398,7 +3510,7 @@ class MainFrame(wx.Frame):
     def _start_selected_route(self) -> None:
         setter = getattr(self.engine, "set_volumes", None)
         if setter is not None:
-            setter(self.microphone_volume.GetValue() / 25.0, self.process_volume.GetValue() / 100.0)
+            setter(self._microphone_gain(), self.process_volume.GetValue() / 100.0)
         self.engine.update_noise_reduction(
             self.noise_reduction_checkbox.GetValue(),
             self.noise_reduction_level.GetValue(),
@@ -3610,6 +3722,40 @@ class MainFrame(wx.Frame):
         self._set_toggle_button_label("Des&ativar mesa")
         self._show_running_state()
         self._play_feedback("start")
+
+    def _microphone_gain(self) -> float:
+        """The microphone level sent to the engine: silent while muted, the slider otherwise."""
+        return 0.0 if self._microphone_muted else self.microphone_volume.GetValue() / 25.0
+
+    def _set_microphone_muted(self, muted: bool) -> None:
+        self._microphone_muted = muted
+        self.mute_checkbox.SetValue(muted)
+        try:
+            setter = getattr(self.engine, "set_volumes", None)
+            if setter is not None:
+                setter(self._microphone_gain(), self.process_volume.GetValue() / 100.0)
+        except Exception as exc:
+            self._microphone_muted = not muted
+            self.mute_checkbox.SetValue(not muted)
+            self._show_error(f"Não foi possível alterar o microfone.\n\n{exc}")
+            return
+        self.SetStatusText("Microfone mutado." if muted else "Microfone desmutado.")
+        # The shortcut works with the window hidden, so the answer must be audible.
+        self._play_feedback("mute" if muted else "unmute", force=True)
+
+    def toggle_microphone_mute(self) -> None:
+        """Mute or unmute the microphone in the mix (global shortcut)."""
+        self._set_microphone_muted(not self._microphone_muted)
+
+    def _on_mute_toggled(self, _event: wx.Event) -> None:
+        self._set_microphone_muted(self.mute_checkbox.GetValue())
+
+    def toggle_table_from_shortcut(self) -> None:
+        """Activate or deactivate the mixer from the global shortcut, with an audible answer."""
+        was_running = self.engine.is_running
+        self._on_toggle(None)
+        if self.engine.is_running != was_running:
+            self._play_feedback("stop" if was_running else "start", force=True)
 
     def _on_exit(self, _event: wx.Event) -> None:
         self.Close()

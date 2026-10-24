@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 import wx
 
@@ -44,9 +44,12 @@ class GlobalHotkeyManager:
         window_toggle_enabled: bool = False,
         window_toggle_modifier: str = "control_alt",
         window_toggle_key: str = "M",
+        extra_shortcuts: Sequence[tuple[bool, str, str, Callable[[], None]]] = (),
     ) -> None:
+        """Register the shortcut groups; ``extra_shortcuts`` holds (enabled, modifier, key, action)."""
         self.close()
-        if not enabled and not window_toggle_enabled:
+        extras = [(modifier, key, action) for on, modifier, key, action in extra_shortcuts if on]
+        if not enabled and not window_toggle_enabled and not extras:
             return
         registrations = []
         if enabled:
@@ -59,6 +62,8 @@ class GlobalHotkeyManager:
             registrations.append(
                 (window_toggle_modifier, ord(window_toggle_key), toggle_window)
             )
+        for modifier, key, action in extras:
+            registrations.append((modifier, ord(key), action))
         try:
             for modifier, key, action in registrations:
                 identifier = int(wx.NewIdRef())
