@@ -37,6 +37,12 @@ class PreferencesStoreTests(unittest.TestCase):
                 window_toggle_shortcut_enabled=True,
                 window_toggle_shortcut_modifier="control_shift",
                 window_toggle_shortcut_key="Q",
+                mic_mute_shortcut_enabled=True,
+                mic_mute_shortcut_modifier="alt_shift",
+                mic_mute_shortcut_key="K",
+                table_toggle_shortcut_enabled=True,
+                table_toggle_shortcut_modifier="control",
+                table_toggle_shortcut_key="7",
                 launch_at_startup=True,
                 feedback_sounds_enabled=True,
             )
@@ -149,6 +155,23 @@ class PreferencesStoreTests(unittest.TestCase):
         self.assertEqual(preferences.window_toggle_shortcut_modifier, "control_alt")
         self.assertEqual(preferences.window_toggle_shortcut_key, "M")
         self.assertFalse(preferences.launch_at_startup)
+
+    def test_invalid_mute_and_table_shortcuts_fall_back_safely(self) -> None:
+        preferences = AppPreferences.from_dict({
+            "mic_mute_shortcut_enabled": "sim",
+            "mic_mute_shortcut_modifier": "windows",
+            "mic_mute_shortcut_key": "F1",
+            "table_toggle_shortcut_enabled": 1,
+            "table_toggle_shortcut_modifier": 3,
+            "table_toggle_shortcut_key": "",
+        })
+
+        self.assertFalse(preferences.mic_mute_shortcut_enabled)
+        self.assertEqual(preferences.mic_mute_shortcut_modifier, "control_alt")
+        self.assertEqual(preferences.mic_mute_shortcut_key, "S")
+        self.assertFalse(preferences.table_toggle_shortcut_enabled)
+        self.assertEqual(preferences.table_toggle_shortcut_modifier, "control_alt")
+        self.assertEqual(preferences.table_toggle_shortcut_key, "A")
 
     def test_legacy_voice_pitch_migrates_to_the_matching_preset(self) -> None:
         preferences = AppPreferences.from_dict(

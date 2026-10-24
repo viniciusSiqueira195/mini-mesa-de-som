@@ -155,6 +155,38 @@ class GlobalHotkeyTests(unittest.TestCase):
         toggle.assert_called_once_with()
 
 
+    def test_registers_extra_shortcuts_only_when_enabled(self):
+        window = Mock()
+        window.RegisterHotKey.return_value = True
+        manager = GlobalHotkeyManager(window)
+        mute, table, off = Mock(), Mock(), Mock()
+
+        with patch("mini_mesa.global_hotkeys.wx.NewIdRef", side_effect=range(10, 20)):
+            manager.apply(
+                enabled=False,
+                effect_modifier="control",
+                page_modifier="alt",
+                play=Mock(),
+                select_page=Mock(),
+                stop=Mock(),
+                extra_shortcuts=(
+                    (True, "control_alt", "S", mute),
+                    (True, "alt", "A", table),
+                    (False, "alt", "Z", off),
+                ),
+            )
+
+        self.assertEqual(window.RegisterHotKey.call_count, 2)
+        self.assertEqual(
+            [call.args[2] for call in window.RegisterHotKey.call_args_list], [ord("S"), ord("A")]
+        )
+        window.Bind.call_args_list[0].args[1](None)
+        window.Bind.call_args_list[1].args[1](None)
+        mute.assert_called_once_with()
+        table.assert_called_once_with()
+        off.assert_not_called()
+
+
 class DiagnosticTests(unittest.TestCase):
     def test_report_is_readable_and_contains_devices(self):
         engine = Mock(is_running=False)

@@ -139,6 +139,12 @@ class AppPreferences:
     window_toggle_shortcut_enabled: bool = False
     window_toggle_shortcut_modifier: str = "control_alt"
     window_toggle_shortcut_key: str = "M"
+    mic_mute_shortcut_enabled: bool = False
+    mic_mute_shortcut_modifier: str = "control_alt"
+    mic_mute_shortcut_key: str = "S"
+    table_toggle_shortcut_enabled: bool = False
+    table_toggle_shortcut_modifier: str = "control_alt"
+    table_toggle_shortcut_key: str = "A"
     launch_at_startup: bool = False
     feedback_sounds_enabled: bool = False
 
@@ -164,6 +170,14 @@ class AppPreferences:
         def bool_value(name: str, default: bool) -> bool:
             value = data.get(name, default)
             return value if isinstance(value, bool) else default
+
+        def shortcut_modifier(name: str) -> str:
+            value = text_value(name, "control_alt")
+            return value if value in {"control", "control_shift", "control_alt", "alt", "alt_shift"} else "control_alt"
+
+        def shortcut_key(name: str, default: str) -> str:
+            value = text_value(name, default)
+            return value if value in tuple("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789") else default
 
         raw_processes = data.get("transmitted_processes", ())
         transmitted_processes = tuple(
@@ -324,6 +338,12 @@ class AppPreferences:
             if text_value("window_toggle_shortcut_key", "M")
             in tuple("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
             else "M",
+            mic_mute_shortcut_enabled=bool_value("mic_mute_shortcut_enabled", False),
+            mic_mute_shortcut_modifier=shortcut_modifier("mic_mute_shortcut_modifier"),
+            mic_mute_shortcut_key=shortcut_key("mic_mute_shortcut_key", "S"),
+            table_toggle_shortcut_enabled=bool_value("table_toggle_shortcut_enabled", False),
+            table_toggle_shortcut_modifier=shortcut_modifier("table_toggle_shortcut_modifier"),
+            table_toggle_shortcut_key=shortcut_key("table_toggle_shortcut_key", "A"),
             launch_at_startup=bool_value("launch_at_startup", False),
             feedback_sounds_enabled=bool_value("feedback_sounds_enabled", False),
             last_seen_news_version=text_value("last_seen_news_version", ""),

@@ -385,7 +385,14 @@ atalho próprio para mostrar a Mini Mesa sobre os outros programas ou minimizá-
 novamente. Esse atalho pode usar Ctrl, Ctrl+Shift, Ctrl+Alt, Alt ou Alt+Shift e
 uma tecla de A a Z ou de 0 a 9. A mesma tela também oferece **Iniciar a Mini Mesa
 com o Windows**, desligado por padrão e registrado somente para o usuário atual;
-ele abre o programa, mas não inicia a transmissão de áudio. Se qualquer
+ele abre o programa, mas não inicia a transmissão de áudio.
+
+Há ainda dois atalhos opcionais, com a mesma escolha de modificador e tecla: um
+para **mutar e desmutar o microfone** (o mesmo estado da caixa **Mutar microfone**,
+que continua mutado ao mover o volume ou reativar a mesa) e outro para **ativar e
+desativar a mesa**. Os dois funcionam com a Mini Mesa minimizada e respondem com um
+som mesmo que os sons de aviso estejam desligados, já que não há como ver a tela.
+Dois atalhos não podem usar a mesma combinação. Se qualquer
 combinação já estiver registrada por outro programa, a Mini Mesa informa qual
 falhou, desativa o conjunto e libera os atalhos que conseguiu registrar.
 
